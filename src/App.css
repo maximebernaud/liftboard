@@ -241,6 +241,131 @@
   border-radius: var(--lb-radius-pill);
 }
 
+.records-storage-note {
+  margin-bottom: var(--lb-space-4);
+  color: var(--lb-color-text-muted);
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+}
+
+.records-storage-error {
+  display: grid;
+  gap: var(--lb-space-4);
+  padding: var(--lb-space-4);
+  border: var(--lb-border-width) solid var(--lb-color-danger);
+  border-radius: var(--lb-radius-lg);
+  background: var(--lb-color-surface);
+}
+
+.record-value {
+  color: var(--lb-color-accent);
+  font-family: var(--lb-font-display);
+  font-size: var(--lb-text-2xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lb-leading-2xl);
+}
+
+.record-value span {
+  color: var(--lb-color-text-muted);
+  font-size: var(--lb-text-base);
+}
+
+.record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lb-space-2);
+  margin-top: var(--lb-space-4);
+}
+
+.record-button {
+  min-width: var(--lb-touch-min);
+  min-height: var(--lb-control-height);
+  padding: var(--lb-space-3) var(--lb-space-4);
+  border: var(--lb-border-width) solid var(--lb-color-control-border);
+  border-radius: var(--lb-radius-md);
+  color: var(--lb-color-text);
+  background: var(--lb-color-raised);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--lb-transition-fast);
+}
+
+.record-button:hover,
+.record-button:active {
+  background: var(--lb-color-surface);
+}
+
+.record-button-primary {
+  width: 100%;
+  border-color: var(--lb-color-accent);
+  color: var(--lb-color-on-accent);
+  background: var(--lb-color-accent);
+}
+
+.record-button-primary:hover,
+.record-button-primary:active {
+  background: var(--lb-color-accent-hover);
+}
+
+.record-button-danger {
+  border-color: transparent;
+  color: var(--lb-color-danger);
+  background: transparent;
+}
+
+.record-form {
+  display: grid;
+  gap: var(--lb-space-2);
+  margin-top: var(--lb-space-4);
+}
+
+.record-form label {
+  font-size: var(--lb-text-sm);
+  font-weight: 500;
+  line-height: var(--lb-leading-sm);
+}
+
+.record-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--lb-control-height);
+  padding: var(--lb-space-3);
+  border: var(--lb-border-width) solid var(--lb-color-control-border);
+  border-radius: var(--lb-radius-md);
+  color: var(--lb-color-text);
+  background: var(--lb-color-raised);
+  font: inherit;
+}
+
+.record-form input[aria-invalid='true'] {
+  border-color: var(--lb-color-danger);
+}
+
+.record-hint,
+.record-error,
+.record-success {
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+}
+
+.record-hint {
+  color: var(--lb-color-text-muted);
+}
+
+.record-error {
+  color: var(--lb-color-danger);
+}
+
+.record-success {
+  color: var(--lb-color-success);
+}
+
+.record-feedback:not(:empty) {
+  margin-top: var(--lb-space-3);
+}
+
 /* Deux colonnes seulement lorsque les cartes disposent d'assez de place. */
 @media (min-width: 640px) {
   .exercise-grid {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import ExerciseCard from './components/ExerciseCard'
 import Header from './components/Header'
+import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
 import './App.css'
 
@@ -12,13 +12,6 @@ const sections = [
 ] as const
 
 type SectionId = (typeof sections)[number]['id']
-
-const exercises = [
-  { name: 'Arraché', category: 'Mouvement olympique' },
-  { name: 'Épaulé-jeté', category: 'Mouvement olympique' },
-  { name: 'Squat avant', category: 'Force' },
-  { name: 'Squat arrière', category: 'Force' },
-]
 
 type EmptyStateProps = {
   icon: SectionId
@@ -89,15 +82,10 @@ function App() {
           <EmptyState icon="sessions" title="Aucune séance planifiée" />
         )}
 
-        {activeSection === 'records' && (
-          <ul className="exercise-grid">
-            {exercises.map((exercise) => (
-              <li key={exercise.name}>
-                <ExerciseCard name={exercise.name} category={exercise.category} />
-              </li>
-            ))}
-          </ul>
-        )}
+        {/* Garder les saisies en cours lorsque l'utilisateur change de section. */}
+        <section hidden={activeSection !== 'records'} aria-label="Records personnels">
+          <PersonalRecords />
+        </section>
 
         {activeSection === 'calculator' && (
           <EmptyState

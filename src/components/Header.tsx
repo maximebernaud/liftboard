@@ -15,7 +15,6 @@ function Header() {
           </span>
           <p className="brand-name">LiftBoard</p>
         </div>
-        <p className="header-subtitle">Votre carnet d’haltérophilie</p>
       </div>
     </header>
   )

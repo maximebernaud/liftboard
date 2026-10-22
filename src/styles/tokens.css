@@ -1,0 +1,77 @@
+:root {
+  color-scheme: dark;
+
+  /* Forge Noire */
+  --lb-color-bg: #0F1112;
+  --lb-color-surface: #1B1F20;
+  --lb-color-raised: #252A2B;
+  --lb-color-accent: #D4A45A;
+  --lb-color-accent-hover: #E0B573;
+
+  /* Textes */
+  --lb-color-text: #F3F0E8;
+  --lb-color-text-muted: #AAB0AD;
+  --lb-color-text-subtle: #92A09E;
+  --lb-color-on-accent: #0F1112;
+
+  /* Contours et états */
+  --lb-color-border: #353A3A;
+  --lb-color-control-border: #758482;
+  --lb-color-focus: #D4A45A;
+  --lb-color-success: #A6C7AC;
+  --lb-color-warning: #E7BE83;
+  --lb-color-danger: #F09A92;
+  --lb-color-planned: #AAB0AD;
+
+  /* Typographie */
+  --lb-font-display: "Saira Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  --lb-font-body: "Commissioner", Arial, sans-serif;
+
+  --lb-text-xs: 12px;
+  --lb-text-sm: 14px;
+  --lb-text-base: 16px;
+  --lb-text-lg: 18px;
+  --lb-text-xl: 24px;
+  --lb-text-2xl: 32px;
+  --lb-text-3xl: 36px;
+
+  --lb-leading-xs: 16px;
+  --lb-leading-sm: 20px;
+  --lb-leading-base: 24px;
+  --lb-leading-lg: 26px;
+  --lb-leading-xl: 30px;
+  --lb-leading-2xl: 38px;
+  --lb-leading-3xl: 44px;
+
+  /* Espacements */
+  --lb-space-1: 4px;
+  --lb-space-2: 8px;
+  --lb-space-3: 12px;
+  --lb-space-4: 16px;
+  --lb-space-5: 20px;
+  --lb-space-6: 24px;
+  --lb-space-8: 32px;
+  --lb-space-10: 40px;
+  --lb-space-12: 48px;
+
+  /* Rayons et dimensions */
+  --lb-radius-sm: 8px;
+  --lb-radius-md: 12px;
+  --lb-radius-lg: 16px;
+  --lb-radius-pill: 999px;
+
+  --lb-border-width: 1px;
+  --lb-focus-width: 2px;
+
+  --lb-touch-min: 44px;
+  --lb-control-height: 48px;
+  --lb-control-height-lg: 52px;
+
+  --lb-content-max: 1040px;
+  --lb-form-max: 680px;
+  --lb-sidebar-width: 224px;
+  --lb-mobile-nav-height: 72px;
+
+  --lb-transition-fast: 120ms ease;
+  --lb-transition-base: 180ms ease;
+}

@@ -147,6 +147,10 @@
   margin-bottom: var(--lb-space-6);
 }
 
+.page-heading-records {
+  margin-bottom: var(--lb-space-4);
+}
+
 .page-heading h1 {
   font-size: var(--lb-text-xl);
   line-height: var(--lb-leading-xl);
@@ -193,6 +197,7 @@
 .exercise-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: var(--lb-space-3);
   margin: 0;
   padding: 0;
@@ -200,7 +205,9 @@
 }
 
 .exercise-card {
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(4 * var(--lb-space-12) + var(--lb-space-8));
   padding: var(--lb-space-4);
   border: var(--lb-border-width) solid var(--lb-color-border);
   border-radius: var(--lb-radius-lg);
@@ -226,6 +233,7 @@
   display: flex;
   align-items: center;
   gap: var(--lb-space-2);
+  min-height: calc(var(--lb-leading-2xl) + var(--lb-space-3) + var(--lb-border-width));
   padding-top: var(--lb-space-3);
   border-top: var(--lb-border-width) solid var(--lb-color-border);
   color: var(--lb-color-text-muted);
@@ -242,7 +250,7 @@
 }
 
 .records-storage-note {
-  margin-bottom: var(--lb-space-4);
+  margin-bottom: var(--lb-space-3);
   color: var(--lb-color-text-muted);
   font-size: var(--lb-text-sm);
   line-height: var(--lb-leading-sm);
@@ -275,7 +283,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--lb-space-2);
-  margin-top: var(--lb-space-4);
+  margin-top: auto;
+  padding-top: var(--lb-space-4);
 }
 
 .record-button {
@@ -298,7 +307,6 @@
 }
 
 .record-button-primary {
-  width: 100%;
   border-color: var(--lb-color-accent);
   color: var(--lb-color-on-accent);
   background: var(--lb-color-accent);
@@ -309,16 +317,52 @@
   background: var(--lb-color-accent-hover);
 }
 
-.record-button-danger {
+.record-button-delete {
+  min-height: var(--lb-touch-min);
+  padding: var(--lb-space-2) var(--lb-space-3);
   border-color: transparent;
-  color: var(--lb-color-danger);
+  color: var(--lb-color-text-muted);
   background: transparent;
+  font-size: var(--lb-text-sm);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+.record-button-delete:hover,
+.record-button-delete:active {
+  color: var(--lb-color-text);
+  background: var(--lb-color-raised);
+}
+
+.record-delete-action {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--lb-space-2);
+  border-top: var(--lb-border-width) solid var(--lb-color-border);
+}
+
+.record-form-actions,
+.record-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lb-space-2);
+  margin-top: var(--lb-space-2);
+}
+
+.record-form-actions > .record-button {
+  flex: 1 1 9em;
+}
+
+.record-dialog-actions > .record-button {
+  flex: 1 1 11em;
 }
 
 .record-form {
   display: grid;
   gap: var(--lb-space-2);
-  margin-top: var(--lb-space-4);
+  padding-top: var(--lb-space-3);
+  border-top: var(--lb-border-width) solid var(--lb-color-border);
 }
 
 .record-form label {
@@ -343,9 +387,12 @@
   border-color: var(--lb-color-danger);
 }
 
+.record-form :is(input, button) {
+  scroll-margin-block: var(--lb-space-4) calc(var(--lb-mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--lb-space-4));
+}
+
 .record-hint,
-.record-error,
-.record-success {
+.record-error {
   font-size: var(--lb-text-sm);
   line-height: var(--lb-leading-sm);
 }
@@ -358,12 +405,45 @@
   color: var(--lb-color-danger);
 }
 
-.record-success {
-  color: var(--lb-color-success);
+.record-dialog {
+  width: min(calc(100% - 2 * var(--lb-space-4)), 28rem);
+  max-height: calc(100vh - 2 * var(--lb-space-4));
+  max-height: calc(100dvh - 2 * var(--lb-space-4));
+  margin: auto;
+  padding: var(--lb-space-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: var(--lb-radius-lg);
+  color: var(--lb-color-text);
+  background: var(--lb-color-surface);
 }
 
-.record-feedback:not(:empty) {
-  margin-top: var(--lb-space-3);
+.record-dialog::backdrop {
+  background: color-mix(in srgb, var(--lb-color-bg) 80%, transparent);
+}
+
+.record-dialog h3 {
+  font-size: var(--lb-text-xl);
+  line-height: var(--lb-leading-xl);
+}
+
+.record-dialog-description {
+  margin-block: var(--lb-space-4);
+  color: var(--lb-color-text-muted);
+}
+
+.record-dialog-description strong {
+  color: var(--lb-color-text);
+  font-weight: 600;
+}
+
+.record-dialog-actions {
+  margin-top: var(--lb-space-6);
+}
+
+.record-button-confirm-delete {
+  color: var(--lb-color-danger);
 }
 
 /* Deux colonnes seulement lorsque les cartes disposent d'assez de place. */
@@ -432,6 +512,10 @@
 
   .app-main {
     padding-block: calc(var(--lb-space-8) + env(safe-area-inset-top, 0px)) calc(var(--lb-space-8) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .record-form :is(input, button) {
+    scroll-margin-block: var(--lb-space-4);
   }
 
   .page-heading h1 {

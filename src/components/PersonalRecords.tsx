@@ -3,12 +3,14 @@ import {
   exercises,
   loadPersonalRecords,
   savePersonalRecords,
+  type Exercise,
   type PersonalRecord,
 } from '../data/personalRecords'
 import ExerciseCard from './ExerciseCard'
 
 function PersonalRecords() {
   const [storedRecords, setStoredRecords] = useState(loadPersonalRecords)
+  const [editingExerciseId, setEditingExerciseId] = useState<Exercise['id'] | null>(null)
 
   function persistRecords(nextRecords: PersonalRecord[]): string | null {
     try {
@@ -49,6 +51,9 @@ function PersonalRecords() {
             <ExerciseCard
               exercise={exercise}
               record={records.find((record) => record.exerciseId === exercise.id)}
+              isEditing={editingExerciseId === exercise.id}
+              onStartEditing={() => setEditingExerciseId(exercise.id)}
+              onStopEditing={() => setEditingExerciseId(null)}
               onSave={(oneRepMaxKg) => persistRecords([
                 ...records.filter((record) => record.exerciseId !== exercise.id),
                 { exerciseId: exercise.id, oneRepMaxKg },

@@ -69,7 +69,7 @@ function App() {
         aria-labelledby="page-title"
         tabIndex={-1}
       >
-        <div className="page-heading">
+        <div className={`page-heading${activeSection === 'records' ? ' page-heading-records' : ''}`}>
           <h1 id="page-title" aria-live="polite" aria-atomic="true">
             {currentSection.title}
           </h1>

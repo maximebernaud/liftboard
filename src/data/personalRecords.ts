@@ -12,7 +12,7 @@ export type PersonalRecord = {
   oneRepMaxKg: number
 }
 
-type RecordsLoadResult =
+export type RecordsLoadResult =
   | { records: PersonalRecord[]; error: null }
   | { records: null; error: string }
 

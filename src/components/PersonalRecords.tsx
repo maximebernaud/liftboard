@@ -1,26 +1,20 @@
 import { useState } from 'react'
 import {
   exercises,
-  loadPersonalRecords,
-  savePersonalRecords,
   type Exercise,
   type PersonalRecord,
+  type RecordsLoadResult,
 } from '../data/personalRecords'
 import ExerciseCard from './ExerciseCard'
 
-function PersonalRecords() {
-  const [storedRecords, setStoredRecords] = useState(loadPersonalRecords)
-  const [editingExerciseId, setEditingExerciseId] = useState<Exercise['id'] | null>(null)
+type PersonalRecordsProps = {
+  storedRecords: RecordsLoadResult
+  onPersist: (records: PersonalRecord[]) => string | null
+  onReload: () => void
+}
 
-  function persistRecords(nextRecords: PersonalRecord[]): string | null {
-    try {
-      savePersonalRecords(nextRecords)
-      setStoredRecords({ records: nextRecords, error: null })
-      return null
-    } catch {
-      return 'Impossible d’enregistrer sur ce navigateur. Aucune modification n’a été sauvegardée. Réessayez.'
-    }
-  }
+function PersonalRecords({ storedRecords, onPersist, onReload }: PersonalRecordsProps) {
+  const [editingExerciseId, setEditingExerciseId] = useState<Exercise['id'] | null>(null)
 
   const { records, error } = storedRecords
 
@@ -32,7 +26,7 @@ function PersonalRecords() {
         <button
           className="record-button"
           type="button"
-          onClick={() => setStoredRecords(loadPersonalRecords())}
+          onClick={onReload}
         >
           Réessayer le chargement
         </button>
@@ -54,11 +48,11 @@ function PersonalRecords() {
               isEditing={editingExerciseId === exercise.id}
               onStartEditing={() => setEditingExerciseId(exercise.id)}
               onStopEditing={() => setEditingExerciseId(null)}
-              onSave={(oneRepMaxKg) => persistRecords([
+              onSave={(oneRepMaxKg) => onPersist([
                 ...records.filter((record) => record.exerciseId !== exercise.id),
                 { exerciseId: exercise.id, oneRepMaxKg },
               ])}
-              onDelete={() => persistRecords(
+              onDelete={() => onPersist(
                 records.filter((record) => record.exerciseId !== exercise.id),
               )}
             />

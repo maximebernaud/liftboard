@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import Calculator from './components/Calculator'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
+import { loadPersonalRecords, savePersonalRecords, type PersonalRecord } from './data/personalRecords'
 import './App.css'
 
 const sections = [
@@ -33,7 +35,24 @@ function EmptyState({ icon, title, description }: EmptyStateProps) {
 
 function App() {
   const [activeSection, setActiveSection] = useState<SectionId>('sessions')
+  const [storedRecords, setStoredRecords] = useState(loadPersonalRecords)
+  const recordsNavButton = useRef<HTMLButtonElement>(null)
   const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0]
+
+  function persistRecords(nextRecords: PersonalRecord[]): string | null {
+    try {
+      savePersonalRecords(nextRecords)
+      setStoredRecords({ records: nextRecords, error: null })
+      return null
+    } catch {
+      return 'Impossible d’enregistrer sur ce navigateur. Aucune modification n’a été sauvegardée. Réessayez.'
+    }
+  }
+
+  function openRecords() {
+    setActiveSection('records')
+    recordsNavButton.current?.focus({ preventScroll: true })
+  }
 
   return (
     <div className="app-shell">
@@ -48,6 +67,7 @@ function App() {
             {sections.map((section) => (
               <li key={section.id}>
                 <button
+                  ref={section.id === 'records' ? recordsNavButton : undefined}
                   className="nav-button"
                   type="button"
                   aria-current={activeSection === section.id ? 'page' : undefined}
@@ -76,6 +96,9 @@ function App() {
           {activeSection === 'records' && (
             <p>Charge maximale sur une répétition (1RM).</p>
           )}
+          {activeSection === 'calculator' && (
+            <p>Calculez une charge à partir de votre record et d’une intensité.</p>
+          )}
         </div>
 
         {activeSection === 'sessions' && (
@@ -84,16 +107,19 @@ function App() {
 
         {/* Garder les saisies en cours lorsque l'utilisateur change de section. */}
         <section hidden={activeSection !== 'records'} aria-label="Records personnels">
-          <PersonalRecords />
+          <PersonalRecords
+            storedRecords={storedRecords}
+            onPersist={persistRecords}
+            onReload={() => setStoredRecords(loadPersonalRecords())}
+          />
         </section>
 
-        {activeSection === 'calculator' && (
-          <EmptyState
-            icon="calculator"
-            title="Calculateur à venir"
-            description="Le calculateur sera développé prochainement."
+        <section hidden={activeSection !== 'calculator'} aria-label="Calculateur de charge">
+          <Calculator
+            storedRecords={storedRecords}
+            onOpenRecords={openRecords}
           />
-        )}
+        </section>
 
         {activeSection === 'history' && (
           <EmptyState icon="history" title="Aucune séance terminée pour le moment" />

@@ -1,7 +1,8 @@
-import { exercises, type Exercise } from '../data/personalRecords.ts'
+import { exercises, type Exercise, type PersonalRecord } from '../data/personalRecords.ts'
 import { calculateLoad, parseIntensity, roundingIncrements, roundLoadDirected } from './loadCalculator.ts'
 import type {
   WorkoutDraft,
+  Workout,
   WorkoutDraftErrors,
   WorkoutDraftValidation,
   WorkoutExercise,
@@ -28,11 +29,44 @@ export function isValidWorkoutDate(input: string): boolean {
 }
 
 export function createWorkoutDraft(date = new Date()): WorkoutDraft {
-  return { id: crypto.randomUUID(), title: '', date: localDateString(date), exercises: [] }
+  return { id: crypto.randomUUID(), title: '', date: localDateString(date), exercises: [], notes: { before: '', during: '', after: '' } }
 }
 
-export function createWorkoutSetDraft(): WorkoutSetDraft {
-  return { id: crypto.randomUUID(), repsInput: '', intensityInput: '', rounding: { mode: 'exact' } }
+export function workoutToDraft(workout: Workout): WorkoutDraft {
+  return {
+    id: workout.id, title: workout.title, date: workout.date, notes: { ...workout.notes },
+    exercises: workout.exercises.map((block) => ({
+      ...block,
+      sets: block.sets.map((set) => ({
+        id: set.id, repsInput: String(set.reps), intensityInput: String(set.intensityPct),
+        rounding: { ...set.rounding }, savedLoad: set.load ? { ...set.load } : null,
+      })),
+    })),
+  }
+}
+
+export function createWorkoutSetDraft(previous?: WorkoutSetDraft): WorkoutSetDraft {
+  const id = crypto.randomUUID()
+  if (previous && parseRepetitions(previous.repsInput) !== null &&
+    parseWorkoutIntensity(previous.intensityInput) !== null && isWorkoutSetRounding(previous.rounding)) {
+    return { id, repsInput: previous.repsInput, intensityInput: previous.intensityInput, rounding: { ...previous.rounding } }
+  }
+  return { id, repsInput: '', intensityInput: '', rounding: { mode: 'exact' } }
+}
+
+/** Nouvelle préparation : aucune charge historique ni observation d'exécution. */
+export function duplicateWorkoutDraft(source: Workout, date = new Date()): WorkoutDraft {
+  return {
+    ...createWorkoutDraft(date),
+    title: `${source.title} — copie`,
+    notes: { before: source.notes.before, during: '', after: '' },
+    exercises: source.exercises.map((block) => ({
+      id: crypto.randomUUID(), exerciseId: block.exerciseId,
+      sets: block.sets.map((set) => createWorkoutSetDraft({
+        id: set.id, repsInput: String(set.reps), intensityInput: String(set.intensityPct), rounding: set.rounding,
+      })),
+    })),
+  }
 }
 
 export function createWorkoutExerciseDraft(
@@ -53,7 +87,7 @@ export function parseWorkoutIntensity(input: string): number | null {
   return parseIntensity(input)
 }
 
-function isWorkoutSetRounding(value: unknown): value is WorkoutSetRounding {
+export function isWorkoutSetRounding(value: unknown): value is WorkoutSetRounding {
   if (typeof value !== 'object' || value === null || !('mode' in value)) return false
   return value.mode === 'exact' || (
     (value.mode === 'down' || value.mode === 'up') &&
@@ -76,18 +110,27 @@ export function updateDraftSet(
   draft: WorkoutDraft,
   blockId: string,
   setId: string,
-  fields: Partial<Pick<WorkoutSetDraft, 'repsInput' | 'intensityInput' | 'rounding'>>,
+  fields: Partial<Omit<WorkoutSetDraft, 'id'>>,
 ): WorkoutDraft {
   return updateDraftExercise(draft, blockId, (block) => ({
     ...block,
-    sets: block.sets.map((set) => set.id === setId ? { ...set, ...fields } : set),
+    sets: block.sets.map((set) => {
+      if (set.id !== setId) return set
+      const recalculate = ('intensityInput' in fields && fields.intensityInput !== set.intensityInput) ||
+        ('rounding' in fields && JSON.stringify(fields.rounding) !== JSON.stringify(set.rounding))
+      return { ...set, ...fields, ...(recalculate ? { savedLoad: undefined } : {}) }
+    }),
   }))
 }
 
-/** Valide et transforme sans modifier le brouillon ni exiger un record 1RM.
- * J5 pourra utiliser workout uniquement lorsque valid vaut true.
- */
-export function validateWorkoutDraft(draft: WorkoutDraft): WorkoutDraftValidation {
+export function changeDraftMovement(draft: WorkoutDraft, blockId: string, exerciseId: Exercise['id']): WorkoutDraft {
+  return updateDraftExercise(draft, blockId, (block) => block.exerciseId === exerciseId ? block : ({
+    ...block, exerciseId, sets: block.sets.map((set) => ({ ...set, savedLoad: undefined })),
+  }))
+}
+
+/** Valide, transforme et fige les charges, sans modifier le brouillon. */
+export function validateWorkoutDraft(draft: WorkoutDraft, records: PersonalRecord[] = []): WorkoutDraftValidation {
   const errors: WorkoutDraftErrors = { blocks: {} }
   if (!draft.title.trim()) errors.title = 'Renseignez un titre pour la séance.'
   if (!isValidWorkoutDate(draft.date)) errors.date = 'Renseignez une date réelle au format AAAA-MM-JJ.'
@@ -118,7 +161,12 @@ export function validateWorkoutDraft(draft: WorkoutDraft): WorkoutDraftValidatio
         valid = false
         blockErrors.fields[set.id] = fieldErrors
       } else {
-        validSets.push({ id: set.id, reps, intensityPct, rounding: { ...set.rounding } })
+        const record = records.find((item) => item.exerciseId === block.exerciseId)
+        const load = getWorkoutSetLoad(set, record?.oneRepMaxKg)
+        validSets.push({
+          id: set.id, reps, intensityPct, rounding: { ...set.rounding },
+          load: load.status === 'ready' ? { exactKg: load.exactKg, selectedKg: load.selectedKg } : null,
+        })
       }
     }
     errors.blocks[block.id] = blockErrors
@@ -128,7 +176,10 @@ export function validateWorkoutDraft(draft: WorkoutDraft): WorkoutDraftValidatio
   return valid
     ? {
       valid: true,
-      workout: { id: draft.id, title: draft.title.trim(), date: draft.date, exercises: validExercises },
+      workout: {
+        id: draft.id, title: draft.title.trim(), date: draft.date, status: 'planned',
+        notes: { ...draft.notes }, exercises: validExercises,
+      },
       errors,
     }
     : { valid: false, workout: null, errors }
@@ -145,6 +196,9 @@ export function getWorkoutSetLoad(
   const intensity = parseWorkoutIntensity(set.intensityInput)
   if (intensity === null || parseRepetitions(set.repsInput) === null || !isWorkoutSetRounding(set.rounding)) {
     return { status: 'invalid-input' }
+  }
+  if (set.savedLoad !== undefined) {
+    return set.savedLoad === null ? { status: 'unavailable' } : { status: 'ready', ...set.savedLoad }
   }
   if (oneRepMaxKg === undefined) return { status: 'missing-record' }
   if (!Number.isFinite(oneRepMaxKg) || oneRepMaxKg <= 0) return { status: 'unavailable' }

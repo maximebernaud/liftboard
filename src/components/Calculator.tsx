@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { exercises, type Exercise, type RecordsLoadResult } from '../data/personalRecords'
 import { calculateLoad, parseIntensity, roundingIncrements, type RoundingIncrement } from '../lib/loadCalculator'
+import { handleNumericArrow } from '../lib/numericInput'
 import './Calculator.css'
 
 type CalculatorProps = {
@@ -79,6 +80,7 @@ function Calculator({ storedRecords, onOpenRecords }: CalculatorProps) {
                 spellCheck={false}
                 value={intensityInput}
                 onChange={(event) => setIntensityInput(event.target.value)}
+                onKeyDown={(event) => handleNumericArrow(event.nativeEvent, event.currentTarget.value, 'intensity', setIntensityInput)}
                 aria-invalid={intensityError !== null}
                 aria-describedby={`calculator-intensity-hint${intensityError ? ' calculator-intensity-error' : ''}`}
               />

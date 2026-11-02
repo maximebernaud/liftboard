@@ -22,7 +22,7 @@ export function parseIntensity(input: string): number | null {
 
 // Conserver les décimales du nombre sans effectuer de multiplication flottante.
 // La notation scientifique couvre aussi les records très petits ou très grands.
-function decimalParts(value: number): { coefficient: bigint; scale: number } {
+export function decimalParts(value: number): { coefficient: bigint; scale: number } {
   const [mantissa, exponent = '0'] = value.toString().split('e')
   const [integer, fraction = ''] = mantissa.split('.')
   const scale = fraction.length - Number(exponent)

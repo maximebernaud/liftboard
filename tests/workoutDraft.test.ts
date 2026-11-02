@@ -136,7 +136,7 @@ describe('brouillon et transformation métier', () => {
     assert.equal(result.workout.title, 'Technique')
     assert.equal(draft.title, '  Technique  ')
     assert.deepEqual(result.workout.exercises[0].sets[0], {
-      id: draft.exercises[0].sets[0].id, reps: 3, intensityPct: 73.3, rounding: { mode: 'exact' },
+      id: draft.exercises[0].sets[0].id, reps: 3, intensityPct: 73.3, rounding: { mode: 'exact' }, load: null,
     })
     assert.deepEqual(JSON.parse(JSON.stringify(result.workout)), result.workout)
   })
@@ -186,7 +186,7 @@ describe('charges dérivées du brouillon', () => {
     assert.deepEqual(getWorkoutSetLoad(set, undefined), { status: 'missing-record' })
   })
 
-  it('préserve le choix indépendant de chaque série et le sérialise sans charge dérivée', () => {
+  it('préserve le choix indépendant de chaque série et représente la charge manquante explicitement', () => {
     const draft = validDraft()
     const block = draft.exercises[0]
     block.sets.push({ ...block.sets[0], id: crypto.randomUUID() })
@@ -202,6 +202,7 @@ describe('charges dérivées du brouillon', () => {
     assert.notEqual(result.workout.exercises[0].sets[0].rounding, next.exercises[0].sets[0].rounding)
     assert.deepEqual(JSON.parse(JSON.stringify(result.workout)), result.workout)
     assert.equal('selectedKg' in result.workout.exercises[0].sets[0], false)
+    assert.equal(result.workout.exercises[0].sets[0].load, null)
   })
 
   it('refuse une configuration d’arrondi mal formée sans afficher une charge', () => {

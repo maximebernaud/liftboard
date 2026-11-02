@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from 'react'
 import { parseOneRepMax, type Exercise, type PersonalRecord } from '../data/personalRecords'
+import { handleNumericArrow } from '../lib/numericInput'
 
 type ExerciseCardProps = {
   exercise: Exercise
@@ -80,6 +81,12 @@ function ExerciseCard({
     stopEditing()
   }
 
+  function changeDraft(value: string) {
+    setDraft(value)
+    setValidationError(null)
+    setSaveError(null)
+  }
+
   function openDeleteDialog() {
     setDeleteError(null)
     deleteDialog.current?.showModal()
@@ -136,11 +143,8 @@ function ExerciseCard({
             autoComplete="off"
             ref={focusInput}
             value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value)
-              setValidationError(null)
-              setSaveError(null)
-            }}
+            onChange={(event) => changeDraft(event.target.value)}
+            onKeyDown={(event) => handleNumericArrow(event.nativeEvent, event.currentTarget.value, 'record', changeDraft)}
             aria-invalid={validationError !== null}
             aria-describedby={`${inputId}-hint${validationError ? ` ${inputId}-error` : ''}${saveError ? ` ${inputId}-save-error` : ''}`}
           />

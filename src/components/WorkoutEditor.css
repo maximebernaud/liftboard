@@ -91,7 +91,7 @@
   line-height: var(--lb-leading-sm);
 }
 
-.workout-field :is(input, select) {
+.workout-field :is(input, select, textarea) {
   width: 100%;
   min-width: 0;
   min-height: var(--lb-control-height);
@@ -108,7 +108,7 @@
   border-color: var(--lb-color-danger);
 }
 
-.workout-sessions :is(input, select, button, h1) {
+.workout-sessions :is(input, select, textarea, summary, button, h1) {
   scroll-margin-block: var(--lb-space-4) calc(var(--lb-mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--lb-space-4));
 }
 
@@ -181,7 +181,123 @@
   margin-top: var(--lb-space-6);
 }
 
+.workout-session-list,
+.workout-notes-fields,
+.workout-notes-error {
+  display: grid;
+  min-width: 0;
+  gap: var(--lb-space-4);
+}
+
+.workout-session-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workout-status {
+  padding: var(--lb-space-1) var(--lb-space-2);
+  border: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: var(--lb-radius-sm);
+  color: var(--lb-color-planned);
+  font-size: var(--lb-text-sm);
+}
+
+.workout-form-actions,
+.workout-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lb-space-2);
+}
+
+.workout-form-actions > button {
+  flex: 1 1 100%;
+}
+
+.workout-card-actions > button {
+  flex: 1 1 6rem;
+}
+
+.workout-session-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workout-duplicate {
+  grid-column: 1 / -1;
+}
+
+.workout-detail-sets {
+  display: grid;
+  gap: var(--lb-space-4);
+  margin: 0;
+  padding-inline-start: var(--lb-space-6);
+}
+
+.workout-detail-sets .workout-set-result {
+  margin-top: 0;
+}
+
+.workout-detail-sets .workout-load {
+  flex: 0 1 auto;
+}
+
+.workout-note-text {
+  white-space: pre-wrap;
+}
+
+.workout-notes-section {
+  min-width: 0;
+  padding: var(--lb-space-4);
+  border: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: var(--lb-radius-lg);
+  background: var(--lb-color-surface);
+}
+
+.workout-notes-section > summary {
+  min-height: var(--lb-touch-min);
+  padding-block: var(--lb-space-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workout-notes-section[open] > p {
+  margin-block: var(--lb-space-2) var(--lb-space-4);
+}
+
+.workout-notes-categories {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--lb-space-2);
+}
+
+.workout-notes-categories > button {
+  min-width: 0;
+  padding-inline: var(--lb-space-1);
+  white-space: nowrap;
+}
+
+.workout-notes-categories > button[aria-pressed='true'] {
+  border-color: var(--lb-color-accent);
+  color: var(--lb-color-accent);
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+.workout-field textarea {
+  resize: vertical;
+  line-height: var(--lb-leading-base);
+}
+
 @media (min-width: 640px) {
+  .workout-session-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workout-duplicate {
+    grid-column: auto;
+  }
+
   .workout-details-fields {
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   }
@@ -192,7 +308,7 @@
     margin-inline: auto;
   }
 
-  .workout-sessions :is(input, select, button, h1) {
+  .workout-sessions :is(input, select, textarea, summary, button, h1) {
     scroll-margin-block: var(--lb-space-4);
   }
 }

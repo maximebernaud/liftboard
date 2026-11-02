@@ -6,12 +6,16 @@ export type WorkoutSetRounding =
   | { mode: 'down' | 'up'; increment: Exclude<RoundingIncrement, null> }
 
 // Données métier sérialisables, indépendantes de React et du stockage.
-// Les charges restent dérivées pendant l'édition ; leur gel historique relève de J5/J6.
+export type WorkoutNotes = { before: string; during: string; after: string }
+export type WorkoutNoteCategory = keyof WorkoutNotes
+export type WorkoutLoad = { exactKg: number; selectedKg: number }
+
 export type WorkoutSet = {
   id: string
   reps: number
   intensityPct: number
   rounding: WorkoutSetRounding
+  load: WorkoutLoad | null
 }
 
 export type WorkoutExercise = {
@@ -24,6 +28,8 @@ export type Workout = {
   id: string
   title: string
   date: string
+  status: 'planned' | 'completed'
+  notes: WorkoutNotes
   exercises: WorkoutExercise[]
 }
 
@@ -33,13 +39,15 @@ export type WorkoutSetDraft = {
   repsInput: string
   intensityInput: string
   rounding: WorkoutSetRounding
+  // undefined : calcul avec les Records actuels ; null : absence enregistrée.
+  savedLoad?: WorkoutLoad | null
 }
 
 export type WorkoutExerciseDraft = Omit<WorkoutExercise, 'sets'> & {
   sets: WorkoutSetDraft[]
 }
 
-export type WorkoutDraft = Omit<Workout, 'exercises'> & {
+export type WorkoutDraft = Omit<Workout, 'exercises' | 'status'> & {
   exercises: WorkoutExerciseDraft[]
 }
 

@@ -3,6 +3,7 @@ import Calculator from './components/Calculator'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
+import WorkoutSessions from './components/WorkoutSessions'
 import { loadPersonalRecords, savePersonalRecords, type PersonalRecord } from './data/personalRecords'
 import './App.css'
 
@@ -36,7 +37,9 @@ function EmptyState({ icon, title, description }: EmptyStateProps) {
 function App() {
   const [activeSection, setActiveSection] = useState<SectionId>('sessions')
   const [storedRecords, setStoredRecords] = useState(loadPersonalRecords)
+  const [returnToWorkout, setReturnToWorkout] = useState(false)
   const recordsNavButton = useRef<HTMLButtonElement>(null)
+  const sessionsNavButton = useRef<HTMLButtonElement>(null)
   const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0]
 
   function persistRecords(nextRecords: PersonalRecord[]): string | null {
@@ -50,8 +53,20 @@ function App() {
   }
 
   function openRecords() {
+    setReturnToWorkout(false)
     setActiveSection('records')
     recordsNavButton.current?.focus({ preventScroll: true })
+  }
+
+  function openWorkoutRecords() {
+    openRecords()
+    setReturnToWorkout(true)
+  }
+
+  function resumeWorkout() {
+    setReturnToWorkout(false)
+    setActiveSection('sessions')
+    sessionsNavButton.current?.focus({ preventScroll: true })
   }
 
   return (
@@ -67,12 +82,15 @@ function App() {
             {sections.map((section) => (
               <li key={section.id}>
                 <button
-                  ref={section.id === 'records' ? recordsNavButton : undefined}
+                  ref={section.id === 'records' ? recordsNavButton : section.id === 'sessions' ? sessionsNavButton : undefined}
                   className="nav-button"
                   type="button"
                   aria-current={activeSection === section.id ? 'page' : undefined}
                   aria-controls="main-content"
-                  onClick={() => setActiveSection(section.id)}
+                  onClick={() => {
+                    setReturnToWorkout(false)
+                    setActiveSection(section.id)
+                  }}
                 >
                   <SectionIcon name={section.id} />
                   <span>{section.label}</span>
@@ -86,24 +104,31 @@ function App() {
       <main
         className="app-main container"
         id="main-content"
-        aria-labelledby="page-title"
+        aria-labelledby={activeSection === 'sessions' ? 'workout-page-title' : 'page-title'}
         tabIndex={-1}
       >
-        <div className={`page-heading${activeSection === 'records' ? ' page-heading-records' : ''}`}>
-          <h1 id="page-title" aria-live="polite" aria-atomic="true">
-            {currentSection.title}
-          </h1>
-          {activeSection === 'records' && (
-            <p>Charge maximale sur une répétition (1RM).</p>
-          )}
-          {activeSection === 'calculator' && (
-            <p>Calculez une charge à partir de votre record et d’une intensité.</p>
-          )}
-        </div>
-
-        {activeSection === 'sessions' && (
-          <EmptyState icon="sessions" title="Aucune séance planifiée" />
+        {activeSection === 'records' && returnToWorkout && (
+          <button className="record-button workout-back" type="button" onClick={resumeWorkout}>
+            <span aria-hidden="true">←</span> Reprendre ma séance
+          </button>
         )}
+        {activeSection !== 'sessions' && (
+          <div className={`page-heading${activeSection === 'records' ? ' page-heading-records' : ''}`}>
+            <h1 id="page-title" aria-live="polite" aria-atomic="true">
+              {currentSection.title}
+            </h1>
+            {activeSection === 'records' && (
+              <p>Charge maximale sur une répétition (1RM).</p>
+            )}
+            {activeSection === 'calculator' && (
+              <p>Calculez une charge à partir de votre record et d’une intensité.</p>
+            )}
+          </div>
+        )}
+
+        <section hidden={activeSection !== 'sessions'} aria-label="Séances">
+          <WorkoutSessions storedRecords={storedRecords} onOpenRecords={openWorkoutRecords} />
+        </section>
 
         {/* Garder les saisies en cours lorsque l'utilisateur change de section. */}
         <section hidden={activeSection !== 'records'} aria-label="Records personnels">

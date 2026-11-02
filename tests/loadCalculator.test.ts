@@ -3,6 +3,9 @@ import { describe, it } from 'node:test'
 import {
   calculateLoad,
   parseIntensity,
+  roundLoadDirected,
+  roundingIncrements,
+  type RoundingDirection,
   type RoundingIncrement,
 } from '../src/lib/loadCalculator.ts'
 
@@ -33,6 +36,60 @@ describe('parseIntensity', () => {
         assert.equal(parseIntensity(`${prefix}1${separator}000000000000000`), 1)
       }
     }
+  })
+})
+
+describe('roundLoadDirected', () => {
+  it('arrondit 9,35 kg dans les deux directions aux trois incréments', () => {
+    for (const [increment, down, up] of [[1, 9, 10], [2.5, 7.5, 10], [5, 5, 10]] as const) {
+      assert.equal(roundLoadDirected(9.35, increment, 'down'), down)
+      assert.equal(roundLoadDirected(9.35, increment, 'up'), up)
+    }
+  })
+
+  it('conserve les multiples exacts, y compris zéro, quelle que soit la direction', () => {
+    for (const increment of roundingIncrements) {
+      for (const value of [0, increment, 10, 100]) {
+        assert.equal(roundLoadDirected(value, increment, 'down'), value)
+        assert.equal(roundLoadDirected(value, increment, 'up'), value)
+      }
+    }
+    assert.equal(roundLoadDirected(7.5, 2.5, 'down'), 7.5)
+    assert.equal(roundLoadDirected(7.5, 2.5, 'up'), 7.5)
+  })
+
+  it('distingue les voisins d’un multiple sans tolérance flottante arbitraire', () => {
+    for (const increment of roundingIncrements) {
+      assert.equal(roundLoadDirected(10 - 1e-12, increment, 'down'), 10 - increment)
+      assert.equal(roundLoadDirected(10 - 1e-12, increment, 'up'), 10)
+      assert.equal(roundLoadDirected(10 + 1e-12, increment, 'down'), 10)
+      assert.equal(roundLoadDirected(10 + 1e-12, increment, 'up'), 10 + increment)
+    }
+    assert.equal(roundLoadDirected(3.0000000000000004, 1, 'down'), 3)
+    assert.equal(roundLoadDirected(3.0000000000000004, 1, 'up'), 4)
+  })
+
+  it('prend en charge les petites décimales et la notation scientifique', () => {
+    for (const value of [0.1, 1e-7, Number.MIN_VALUE]) {
+      for (const increment of roundingIncrements) {
+        assert.equal(roundLoadDirected(value, increment, 'down'), 0)
+        assert.equal(roundLoadDirected(value, increment, 'up'), increment)
+      }
+    }
+    for (const value of [1e25, Number.MAX_VALUE]) {
+      assert.equal(roundLoadDirected(value, 2.5, 'down'), value)
+      assert.equal(roundLoadDirected(value, 2.5, 'up'), value)
+    }
+  })
+
+  it('refuse les charges, incréments et directions invalides', () => {
+    for (const value of [-1, NaN, Infinity, -Infinity]) {
+      assert.throws(() => roundLoadDirected(value, 1, 'down'), RangeError)
+    }
+    for (const increment of [null, 0, 3, NaN, Infinity]) {
+      assert.throws(() => roundLoadDirected(10, increment as 1, 'up'), RangeError)
+    }
+    assert.throws(() => roundLoadDirected(10, 1, 'nearest' as RoundingDirection), RangeError)
   })
 })
 

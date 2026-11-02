@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { exercises, type Exercise, type RecordsLoadResult } from '../data/personalRecords'
-import { calculateLoad, parseIntensity, type RoundingIncrement } from '../lib/loadCalculator'
+import { calculateLoad, parseIntensity, roundingIncrements, type RoundingIncrement } from '../lib/loadCalculator'
 import './Calculator.css'
 
 type CalculatorProps = {
@@ -10,9 +10,7 @@ type CalculatorProps = {
 
 const roundingOptions: { value: RoundingIncrement; label: string }[] = [
   { value: null, label: 'Aucun arrondi' },
-  { value: 1, label: 'Multiple de 1 kg' },
-  { value: 2.5, label: 'Multiple de 2,5 kg' },
-  { value: 5, label: 'Multiple de 5 kg' },
+  ...roundingIncrements.map((value) => ({ value, label: `Multiple de ${formatNumber(value)} kg` })),
 ]
 
 // Conserver les décimales du calcul sans imposer un arrondi d’affichage.

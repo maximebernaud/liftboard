@@ -1,0 +1,198 @@
+.workout-sessions {
+  width: 100%;
+  max-width: var(--lb-form-max);
+  min-width: 0;
+}
+
+.workout-list-heading,
+.workout-block-heading,
+.workout-set-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lb-space-3);
+}
+
+.workout-rounding {
+  margin-top: var(--lb-space-3);
+}
+
+.workout-remove {
+  flex-shrink: 0;
+  min-width: var(--lb-touch-min);
+  min-height: var(--lb-touch-min);
+  max-width: 100%;
+  white-space: normal;
+}
+
+.workout-back {
+  margin-bottom: var(--lb-space-4);
+  padding-inline: var(--lb-space-2);
+  border-color: transparent;
+  background: transparent;
+}
+
+.workout-heading .record-hint {
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+}
+
+.workout-editor,
+.workout-exercise-list {
+  display: grid;
+  gap: var(--lb-space-4);
+  min-width: 0;
+}
+
+.workout-details,
+.workout-exercise,
+.workout-resume {
+  display: grid;
+  gap: var(--lb-space-4);
+  min-width: 0;
+  padding: var(--lb-space-4);
+  border: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: var(--lb-radius-lg);
+  background: var(--lb-color-surface);
+}
+
+.workout-resume {
+  justify-items: start;
+  margin-bottom: var(--lb-space-4);
+}
+
+.workout-sessions h2 {
+  font-size: var(--lb-text-lg);
+  font-weight: 600;
+  line-height: var(--lb-leading-lg);
+}
+
+.workout-details-fields,
+.workout-field,
+.workout-set-list,
+.workout-load {
+  display: grid;
+  gap: var(--lb-space-2);
+  min-width: 0;
+}
+
+.workout-details-fields,
+.workout-set-list {
+  align-items: start;
+  gap: var(--lb-space-4);
+}
+
+.workout-field label,
+.workout-label,
+.workout-set legend {
+  font-size: var(--lb-text-sm);
+  font-weight: 500;
+  line-height: var(--lb-leading-sm);
+}
+
+.workout-field :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--lb-control-height);
+  padding: var(--lb-space-3);
+  border: var(--lb-border-width) solid var(--lb-color-control-border);
+  border-radius: var(--lb-radius-md);
+  color: var(--lb-color-text);
+  background: var(--lb-color-raised);
+  font: inherit;
+  font-size: var(--lb-text-base);
+}
+
+.workout-field input[aria-invalid='true'] {
+  border-color: var(--lb-color-danger);
+}
+
+.workout-sessions :is(input, select, button, h1) {
+  scroll-margin-block: var(--lb-space-4) calc(var(--lb-mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--lb-space-4));
+}
+
+.workout-record-context {
+  display: grid;
+  justify-items: start;
+  gap: var(--lb-space-2);
+  color: var(--lb-color-text-muted);
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+}
+
+.workout-record-context strong {
+  color: var(--lb-color-text);
+  font-weight: 500;
+}
+
+.workout-set {
+  min-width: 0;
+  margin: 0;
+  padding: var(--lb-space-3);
+  border: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: var(--lb-radius-md);
+}
+
+.workout-set legend {
+  padding-inline: var(--lb-space-1);
+}
+
+.workout-set-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--lb-space-3);
+}
+
+.workout-set-result {
+  align-items: flex-end;
+  margin-top: var(--lb-space-3);
+}
+
+.workout-load {
+  flex: 1 1 6rem;
+  gap: var(--lb-space-1);
+}
+
+.workout-load > strong {
+  color: var(--lb-color-accent);
+  font-family: var(--lb-font-display);
+  font-size: var(--lb-text-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lb-leading-xl);
+}
+
+.workout-load > strong > span {
+  font-size: var(--lb-text-base);
+  font-weight: 500;
+}
+
+.workout-add-set {
+  justify-self: start;
+}
+
+.workout-add-exercise {
+  width: 100%;
+}
+
+.workout-discard {
+  margin-top: var(--lb-space-6);
+}
+
+@media (min-width: 640px) {
+  .workout-details-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 960px) {
+  .workout-sessions {
+    margin-inline: auto;
+  }
+
+  .workout-sessions :is(input, select, button, h1) {
+    scroll-margin-block: var(--lb-space-4);
+  }
+}

@@ -1,4 +1,6 @@
-export type RoundingIncrement = null | 1 | 2.5 | 5
+export const roundingIncrements = [1, 2.5, 5] as const
+export type RoundingIncrement = null | (typeof roundingIncrements)[number]
+export type RoundingDirection = 'down' | 'up'
 
 export type LoadCalculation = {
   exactKg: number
@@ -31,6 +33,34 @@ function decimalParts(value: number): { coefficient: bigint; scale: number } {
     : { coefficient, scale }
 }
 
+/** Arrondi choisi par l'utilisateur, sans modifier les multiples déjà exacts.
+ * Les divisions entières évitent les erreurs de précision des divisions flottantes.
+ */
+export function roundLoadDirected(
+  exactKg: number,
+  increment: Exclude<RoundingIncrement, null>,
+  direction: RoundingDirection,
+): number {
+  if (!Number.isFinite(exactKg) || exactKg < 0) {
+    throw new RangeError('La charge doit être un nombre fini supérieur ou égal à 0.')
+  }
+  if (!roundingIncrements.some((value) => value === increment)) {
+    throw new RangeError('L’incrément doit être 1, 2,5 ou 5 kg.')
+  }
+  if (direction !== 'down' && direction !== 'up') {
+    throw new RangeError('La direction doit être inférieure ou supérieure.')
+  }
+
+  const { coefficient, scale } = decimalParts(exactKg)
+  const incrementTenths = BigInt(increment * 10)
+  const numerator = coefficient * 10n
+  const denominator = 10n ** BigInt(scale) * incrementTenths
+  const lowerMultiple = numerator / denominator
+  const remainder = numerator % denominator
+  const multiple = lowerMultiple + (direction === 'up' && remainder !== 0n ? 1n : 0n)
+  return Number(`${multiple * incrementTenths}e-1`)
+}
+
 /** Calcul de charge réutilisable, sans dépendance à React ni au stockage.
  * À mi-chemin entre deux multiples, retenir le multiple supérieur.
  */
@@ -45,7 +75,7 @@ export function calculateLoad(
   if (!Number.isFinite(intensityPct) || intensityPct < 1 || intensityPct > 100) {
     throw new RangeError('L’intensité doit être comprise entre 1 et 100 %.')
   }
-  if (![null, 1, 2.5, 5].includes(roundingIncrement)) {
+  if (roundingIncrement !== null && !roundingIncrements.some((value) => value === roundingIncrement)) {
     throw new RangeError('L’incrément doit être 1, 2,5 ou 5 kg, ou aucun arrondi.')
   }
 

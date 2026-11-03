@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Calculator from './components/Calculator'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
 import WorkoutSessions from './components/WorkoutSessions'
 import { loadPersonalRecords, savePersonalRecords, type PersonalRecord } from './data/personalRecords'
+import { loadNavigation, saveNavigation, type SectionId } from './lib/navigation'
 import './App.css'
 
 const sections = [
@@ -13,8 +14,6 @@ const sections = [
   { id: 'calculator', label: 'Calculer', title: 'Calculer' },
   { id: 'history', label: 'Historique', title: 'Historique' },
 ] as const
-
-type SectionId = (typeof sections)[number]['id']
 
 type EmptyStateProps = {
   icon: SectionId
@@ -35,12 +34,23 @@ function EmptyState({ icon, title, description }: EmptyStateProps) {
 }
 
 function App() {
-  const [activeSection, setActiveSection] = useState<SectionId>('sessions')
+  const [navigation, setNavigation] = useState(loadNavigation)
+  const activeSection = navigation.section
   const [storedRecords, setStoredRecords] = useState(loadPersonalRecords)
   const [returnToWorkout, setReturnToWorkout] = useState(false)
   const recordsNavButton = useRef<HTMLButtonElement>(null)
   const sessionsNavButton = useRef<HTMLButtonElement>(null)
   const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0]
+
+  useEffect(() => { saveNavigation(navigation) }, [navigation])
+
+  const setTrackingWorkoutId = useCallback((id: string | null) => {
+    setNavigation((current) => current.trackingWorkoutId === id ? current : { ...current, trackingWorkoutId: id })
+  }, [])
+
+  function setActiveSection(section: SectionId) {
+    setNavigation((current) => ({ ...current, section }))
+  }
 
   function persistRecords(nextRecords: PersonalRecord[]): string | null {
     try {
@@ -127,7 +137,8 @@ function App() {
         )}
 
         <section hidden={activeSection !== 'sessions'} aria-label="Séances">
-          <WorkoutSessions storedRecords={storedRecords} onOpenRecords={openWorkoutRecords} />
+          <WorkoutSessions storedRecords={storedRecords} onOpenRecords={openWorkoutRecords}
+            initialTrackingWorkoutId={navigation.trackingWorkoutId} onTrackingChange={setTrackingWorkoutId} />
         </section>
 
         {/* Garder les saisies en cours lorsque l'utilisateur change de section. */}

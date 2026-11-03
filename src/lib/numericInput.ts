@@ -1,9 +1,13 @@
 import { parseOneRepMax } from '../data/personalRecords.ts'
 import { decimalParts, parseIntensity } from './loadCalculator.ts'
 import { parseRepetitions } from './workoutDraft.ts'
+import { parseExecutionLoad, parseExecutionReps } from './workoutExecution.ts'
 
-export type NumericField = 'record' | 'intensity' | 'reps'
-const parsers = { record: parseOneRepMax, intensity: parseIntensity, reps: parseRepetitions }
+export type NumericField = 'record' | 'intensity' | 'reps' | 'execution-reps' | 'execution-load'
+const parsers = {
+  record: parseOneRepMax, intensity: parseIntensity, reps: parseRepetitions,
+  'execution-reps': parseExecutionReps, 'execution-load': parseExecutionLoad,
+}
 
 /** null : saisie incomplète/invalide ; valeur inchangée : borne atteinte. */
 export function stepNumericInput(input: string, field: NumericField, direction: 1 | -1): string | null {
@@ -15,11 +19,18 @@ export function stepNumericInput(input: string, field: NumericField, direction: 
   const { coefficient, scale } = decimalParts(value)
   const precision = Math.max(scale, 1)
   const units = coefficient * 10n ** BigInt(precision - scale)
-  const step = field === 'reps' ? 10n ** BigInt(precision) : 5n * 10n ** BigInt(precision - 1)
-  let next = Number(`${units + BigInt(direction) * step}e-${precision}`)
+  const integerField = field === 'reps' || field === 'execution-reps'
+  const step = integerField ? 10n ** BigInt(precision) : 5n * 10n ** BigInt(precision - 1)
+  const nextUnits = units + BigInt(direction) * step
+  if (field === 'execution-load' && nextUnits > BigInt(Number.MAX_SAFE_INTEGER) * 10n ** BigInt(precision)) return input
+  let next = Number(`${nextUnits}e-${precision}`)
+  if (field === 'execution-load' && Number.isFinite(next) && next > 0) {
+    const decimal = decimalParts(next)
+    if (decimal.coefficient * 10n ** BigInt(precision) !== nextUnits * 10n ** BigInt(decimal.scale)) return input
+  }
   if (field === 'intensity') next = Math.min(100, Math.max(1, next))
   // Pas de minimum artificiel pour un 1RM, ni de dépassement de la précision JS.
-  if (!Number.isFinite(next) || next <= 0 || (field === 'reps' && !Number.isSafeInteger(next)) || next === value) return input
+  if (!Number.isFinite(next) || next <= 0 || (integerField && !Number.isSafeInteger(next)) || next === value) return input
   return String(next).replace('.', input.includes('.') ? '.' : ',')
 }
 

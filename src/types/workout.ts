@@ -10,12 +10,22 @@ export type WorkoutNotes = { before: string; during: string; after: string }
 export type WorkoutNoteCategory = keyof WorkoutNotes
 export type WorkoutLoad = { exactKg: number; selectedKg: number }
 
+// Une saisie partielle n'est jamais une confirmation de réalisation.
+export type WorkoutSetExecution = (
+  | { completed: false; reps: number | null; loadKg: number | null }
+  | { completed: true; reps: number; loadKg: number }
+) & {
+  // Facultatif pour J6-A existant : distinguer un effacement d'un champ intact.
+  cleared?: Partial<Record<'reps' | 'loadKg', true>>
+}
+
 export type WorkoutSet = {
   id: string
   reps: number
   intensityPct: number
   rounding: WorkoutSetRounding
   load: WorkoutLoad | null
+  execution?: WorkoutSetExecution
 }
 
 export type WorkoutExercise = {

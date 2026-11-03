@@ -1,7 +1,8 @@
 import { exercises } from './personalRecords.ts'
 import { isValidWorkoutDate, isWorkoutSetRounding } from '../lib/workoutDraft.ts'
 import { roundLoadDirected } from '../lib/loadCalculator.ts'
-import type { Workout, WorkoutNotes, WorkoutNoteCategory } from '../types/workout.ts'
+import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution, workoutProgramSignature } from '../lib/workoutExecution.ts'
+import type { Workout, WorkoutNotes, WorkoutNoteCategory, WorkoutSetExecution } from '../types/workout.ts'
 
 export const workoutsStorageKey = 'liftboard.workouts.v1'
 export type WorkoutStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -36,7 +37,8 @@ export function isWorkout(value: unknown): value is Workout {
       if (!object(set) || !uniqueId(set.id) || typeof set.reps !== 'number' ||
         !Number.isSafeInteger(set.reps) || set.reps <= 0 || typeof set.intensityPct !== 'number' ||
         !Number.isFinite(set.intensityPct) || set.intensityPct < 1 || set.intensityPct > 100 ||
-        !isWorkoutSetRounding(set.rounding)) return false
+        !isWorkoutSetRounding(set.rounding) ||
+        ('execution' in set && !isWorkoutSetExecution(set.execution))) return false
       if (set.load === null) return true
       if (!object(set.load) || typeof set.load.exactKg !== 'number' || !Number.isFinite(set.load.exactKg) ||
         set.load.exactKg <= 0 || typeof set.load.selectedKg !== 'number' || !Number.isFinite(set.load.selectedKg) ||
@@ -75,7 +77,8 @@ function writeWorkouts(workouts: Workout[], storage?: WorkoutStorage): WorkoutsR
 }
 
 export function createWorkout(workout: Workout, storage?: WorkoutStorage): WorkoutsResult {
-  if (!isWorkout(workout) || workout.status !== 'planned') return fail('La séance est invalide et n’a pas été enregistrée.')
+  if (!isWorkout(workout) || workout.status !== 'planned' || workout.exercises.some((block) =>
+    block.sets.some((set) => set.execution && !isWritableExecution(set.execution)))) return fail('La séance est invalide et n’a pas été enregistrée.')
   const current = loadWorkouts(storage)
   if (!current.ok) return current
   if (current.workouts.some((item) => item.id === workout.id)) return fail('Cette séance existe déjà. Aucun doublon créé.')
@@ -90,6 +93,9 @@ export function updateWorkout(workout: Workout, original: Workout, storage?: Wor
   if (!current.ok) return current
   const latest = current.workouts.find((item) => item.id === workout.id)
   if (!latest) return fail('Cette séance n’existe plus. Vos saisies sont conservées en mémoire.')
+  if (hasWorkoutExecution(latest) || hasWorkoutExecution(original) || hasWorkoutExecution(workout)) {
+    return fail('Le suivi de cette séance a commencé. Sa programmation est protégée pour conserver les résultats. Les notes restent modifiables ; dupliquez la séance pour préparer une autre programmation.')
+  }
   const withoutNotes = (value: Workout) => ({ ...value, notes: undefined })
   if (JSON.stringify(withoutNotes(latest)) !== JSON.stringify(withoutNotes(original))) return fail(conflict)
   const notes = { ...latest.notes }
@@ -123,6 +129,40 @@ export function updateWorkoutNotes(id: string, patch: Partial<WorkoutNotes>, sto
 
 export function updateWorkoutNote(id: string, category: WorkoutNoteCategory, text: string, storage?: WorkoutStorage): WorkoutsResult {
   return updateWorkoutNotes(id, { [category]: text }, storage)
+}
+
+/** Écriture ciblée sur la version persistée, avec contrôle de la série ouverte. */
+export function updateWorkoutSetExecution(
+  original: Workout,
+  blockId: string,
+  setId: string,
+  execution: WorkoutSetExecution,
+  storage?: WorkoutStorage,
+): WorkoutsResult {
+  if (!isWorkout(original) || !identifier(blockId) || !identifier(setId) || !isWorkoutSetExecution(execution)) {
+    return fail('Résultat invalide. Aucune modification enregistrée.')
+  }
+  const current = loadWorkouts(storage)
+  if (!current.ok) return current
+  const latest = current.workouts.find((item) => item.id === original.id)
+  if (!latest) return fail('Cette séance n’existe plus. Les résultats restent uniquement en mémoire.')
+  if (latest.status !== 'planned' || workoutProgramSignature(latest) !== workoutProgramSignature(original)) return fail(conflict)
+  const previousSet = original.exercises.find((block) => block.id === blockId)?.sets.find((set) => set.id === setId)
+  const latestSet = latest.exercises.find((block) => block.id === blockId)?.sets.find((set) => set.id === setId)
+  if (!previousSet || !latestSet) return fail('Cette série n’existe plus. Vos saisies restent en mémoire.')
+  if (!sameExecution(latestSet.execution, previousSet.execution) && !sameExecution(latestSet.execution, execution)) {
+    return fail('Les résultats de cette série ont changé ailleurs. Vos saisies restent en mémoire. Revenez à la séance puis rouvrez le suivi pour consulter la version enregistrée avant de corriger.')
+  }
+  if (!isWritableExecution(execution, latestSet.execution)) {
+    return fail('Résultat invalide : répétitions entières et charge strictement positives, dans les limites numériques sûres. Aucune modification enregistrée.')
+  }
+  const updated: Workout = {
+    ...latest,
+    exercises: latest.exercises.map((block) => block.id !== blockId ? block : ({
+      ...block, sets: block.sets.map((set) => set.id !== setId ? set : { ...set, execution: { ...execution } }),
+    })),
+  }
+  return writeWorkouts(current.workouts.map((item) => item.id === latest.id ? updated : item), storage)
 }
 
 export function sortWorkouts(workouts: Workout[]): Workout[] {

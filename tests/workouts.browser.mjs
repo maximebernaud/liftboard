@@ -10,7 +10,7 @@ import { join } from 'node:path'
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:5173'
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(baseUrl).hostname), 'Utiliser uniquement un serveur local de test')
 const chromePath = process.env.LIFTBOARD_TEST_CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-const artifactDirectory = await mkdtemp(join(tmpdir(), 'liftboard-j5-test-'))
+const artifactDirectory = await mkdtemp(join(tmpdir(), 'liftboard-j6-test-'))
 const browser = spawn(chromePath, [
   '--headless=new', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
   `--user-data-dir=${join(artifactDirectory, 'profile')}`, '--no-first-run', '--no-default-browser-check',
@@ -22,6 +22,8 @@ let nextId = 0
 const pending = new Map()
 const browserErrors = []
 let passed = 0
+let acceptBeforeUnload = false
+let beforeUnloadPrompts = 0
 
 function command(method, params = {}) {
   return new Promise((resolve, reject) => {
@@ -92,11 +94,13 @@ async function waitForApp() {
   throw new Error('LiftBoard ne s’affiche pas')
 }
 
-async function reload() {
+async function reload(discardUnsaved = false) {
+  acceptBeforeUnload = discardUnsaved
   await command('Page.reload')
   await new Promise((resolve) => setTimeout(resolve, 200))
   await waitForApp()
   await settle()
+  acceptBeforeUnload = false
 }
 
 const storedWorkouts = () => evaluate('JSON.parse(localStorage.getItem("liftboard.workouts.v1") ?? "[]")')
@@ -149,6 +153,10 @@ try {
   socket = new WebSocket(target.webSocketDebuggerUrl)
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data)
+    if (message.method === 'Page.javascriptDialogOpening' && message.params.type === 'beforeunload' && acceptBeforeUnload) {
+      beforeUnloadPrompts++
+      void command('Page.handleJavaScriptDialog', { accept: true }).catch(error => browserErrors.push(String(error)))
+    }
     if (message.method === 'Runtime.exceptionThrown') browserErrors.push(message.params.exceptionDetails)
     const request = pending.get(message.id)
     if (!request) return
@@ -614,6 +622,453 @@ try {
     assert.equal(after.length, 3)
     assert.deepEqual(after.slice(0, 2), before)
     assert.ok(after[2].exercises.every(block => block.sets.every(set => set.load === null)))
+  })
+
+  const j6Source = {
+    id: 'j6-workout', title: 'Suivi technique', date: '2026-11-03', status: 'planned',
+    notes: { before: 'Barre proche', during: '', after: '' },
+    exercises: [0, 1].map((block) => ({
+      id: `j6-block-${block}`, exerciseId: block === 0 ? 'snatch' : 'front-squat',
+      sets: (block === 0 ? [0, 1, 2] : [3, 4]).map((index) => ({
+        id: `j6-set-${index}`, reps: 3, intensityPct: 80, rounding: { mode: 'exact' },
+        load: index === 4 ? null : { exactKg: 80, selectedKg: 80 },
+      })),
+    })),
+  }
+  const executionScope = (index) => `#execution-j6-set-${index}-form`
+  const executionField = (index, field) => `#execution-j6-set-${index}-${field}`
+  const executionAt = async (index) => (await storedWorkouts())[0].exercises.flatMap((block) => block.sets)[index].execution
+
+  await check('J6 : ancienne séance lisible, suivi vide et cinq largeurs accessibles', async () => {
+    await call((source) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), j6Source)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Démarrer le suivi')
+    assert.equal(await guardActive(), false)
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 5)
+    assert.deepEqual(await storedWorkouts(), [j6Source])
+    for (const width of [320, 393, 430, 768, 1440]) {
+      await viewport(width, 'tracking-empty', width === 320 || width === 1440)
+      assert.ok(await evaluate(`[...document.querySelectorAll('.workout-execution-set input')].every(input => parseFloat(getComputedStyle(input).fontSize) >= 16 && input.labels.length === 1)`))
+    }
+  })
+
+  await check('J6 : confirmation prévue, saisie différente, curseur stable et notes indépendantes', async () => {
+    await click('Série réalisée', executionScope(0))
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 3, loadKg: 80 })
+    await enter(executionField(1, 'reps'), '2')
+    assert.deepEqual(await executionAt(1), { completed: false, reps: 2, loadKg: null })
+    await call((selector) => {
+      const input = document.querySelector(selector)
+      window.j6Input = input
+      input.focus()
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '77,5')
+      input.setSelectionRange(2, 2)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }, executionField(1, 'loadKg'))
+    await settle()
+    assert.deepEqual(await evaluate('({same:document.activeElement === window.j6Input, cursor:window.j6Input.selectionStart})'), { same: true, cursor: 2 })
+    assert.deepEqual(await executionAt(1), { completed: false, reps: 2, loadKg: 77.5 })
+    await click('Notes de séance')
+    await enter('textarea', 'Réception à stabiliser')
+    assert.equal(await evaluate('document.querySelectorAll("#workout-page-title").length'), 1)
+    await click('← Retour au suivi')
+    await click('Série réalisée', executionScope(1))
+    assert.deepEqual(await executionAt(1), { completed: true, reps: 2, loadKg: 77.5 })
+    const [saved] = await storedWorkouts()
+    assert.equal(saved.notes.during, 'Réception à stabiliser')
+    assert.deepEqual(saved.exercises[0].sets[1].load, { exactKg: 80, selectedKg: 80 })
+    assert.equal(saved.exercises[0].sets[1].reps, 3)
+    assert.equal(saved.status, 'planned')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 5')
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('J6 : retour Records, rechargement et reprise des résultats enregistrés', async () => {
+    const before = await storedWorkouts()
+    await click('Records', '.primary-nav')
+    await click('Séances', '.primary-nav')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(1, 'loadKg')), '77,5')
+    await click('← Retour à la séance')
+    assert.equal(await evaluate('[...document.querySelectorAll("button")].find(button => button.textContent === "Modifier").disabled'), true)
+    assert.match(await evaluate('document.querySelector("#workout-program-protection").textContent'), /Programmation verrouillée.*performances/)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Reprendre le suivi')
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 5')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(1, 'reps')), '2')
+  })
+
+  await check('J6 : saisie partielle conservée après rechargement sans réalisation implicite', async () => {
+    await enter(executionField(2, 'reps'), '1')
+    assert.deepEqual(await executionAt(2), { completed: false, reps: 1, loadKg: null })
+    assert.equal(await guardActive(), false)
+    await reload()
+    assert.match(await evaluate('document.querySelector("#workout-page-title").textContent'), /Suivi · Suivi technique/)
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'reps')), '1')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 5')
+  })
+
+  await check('J6 : saisie invalide préservée dans les notes et les onglets, sortie protégée', async () => {
+    await enter(executionField(2, 'loadKg'), '75,')
+    assert.equal(await guardActive(), true)
+    assert.deepEqual(await executionAt(2), { completed: false, reps: 1, loadKg: null })
+    await click('Série réalisée', executionScope(2))
+    assert.equal(await call((selector) => document.querySelector(selector).getAttribute('aria-invalid'), executionField(2, 'loadKg')), 'true')
+    assert.equal(await call((selector) => document.activeElement === document.querySelector(selector), executionField(2, 'loadKg')), true)
+    await click('Notes de séance')
+    await enter('textarea', 'Note indépendante de la saisie invalide')
+    await click('← Retour au suivi')
+    await click('Calculer', '.primary-nav')
+    await click('Séances', '.primary-nav')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'loadKg')), '75,')
+    await click('← Retour à la séance')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /seront perdues/)
+    await click('Annuler', 'dialog[open]')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'loadKg')), '75,')
+    await click('Retour aux séances')
+    await click('Abandonner la saisie', 'dialog[open]')
+    assert.equal(await guardActive(), false)
+    await click('Ouvrir', '.workout-session-list')
+    await click('Reprendre le suivi')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'loadKg')), '')
+    assert.equal((await storedWorkouts())[0].notes.during, 'Note indépendante de la saisie invalide')
+  })
+
+  await check('J6 : correction explicite et annulation de réalisation sans effacer les performances', async () => {
+    await enter(executionField(1, 'reps'), '1')
+    await enter(executionField(1, 'loadKg'), '75')
+    assert.deepEqual(await executionAt(1), { completed: true, reps: 2, loadKg: 77.5 })
+    assert.equal(await guardActive(), true)
+    await click('Enregistrer la correction', executionScope(1))
+    assert.deepEqual(await executionAt(1), { completed: true, reps: 1, loadKg: 75 })
+    assert.equal(await guardActive(), false)
+    await enter(executionField(1, 'loadKg'), 'abc')
+    await click('Rétablir les valeurs enregistrées', executionScope(1))
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(1, 'loadKg')), '75')
+    assert.equal(await guardActive(), false)
+    await click('Annuler l’état réalisé', executionScope(1))
+    assert.deepEqual(await executionAt(1), { completed: false, reps: 1, loadKg: 75 })
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(1, 'loadKg')), '75')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    await click('Série réalisée', executionScope(1))
+  })
+
+  await check('J6 : écriture et quota en échec, saisie visible, navigation protégée et nouvelle tentative', async () => {
+    const before = await storedWorkouts()
+    await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function() { throw new DOMException('Full', 'QuotaExceededError') }`)
+    await enter(executionField(3, 'loadKg'), '72,5')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(3, 'loadKg')), '72,5')
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.match(await call((scope) => document.querySelector(scope).textContent, executionScope(3)), /Non enregistré.*plein/)
+    assert.equal(await guardActive(), true)
+    await click('← Retour à la séance')
+    await click('Annuler', 'dialog[open]')
+    await evaluate('Storage.prototype.setItem = window.originalSetItem')
+    await click('Réessayer', executionScope(3))
+    assert.deepEqual(await executionAt(3), { completed: false, reps: null, loadKg: 72.5 })
+    assert.equal(await guardActive(), false)
+    await evaluate(`Storage.prototype.setItem = function() { throw new Error('Write failure') }`)
+    await click('Série réalisée', executionScope(3))
+    assert.equal((await executionAt(3)).completed, false)
+    assert.match(await call((scope) => document.querySelector(scope).textContent, executionScope(3)), /Non enregistré/)
+    await evaluate('Storage.prototype.setItem = window.originalSetItem')
+    await click('Réessayer', executionScope(3))
+    assert.deepEqual(await executionAt(3), { completed: true, reps: 3, loadKg: 72.5 })
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('J6 : charge prévue absente et progression complète sans clôture', async () => {
+    await click('Série réalisée', executionScope(4))
+    assert.equal(await executionAt(4), undefined)
+    assert.match(await call((scope) => document.querySelector(scope).textContent, executionScope(4)), /Renseignez la charge/)
+    await enter(executionField(4, 'loadKg'), '20')
+    await click('Série réalisée', executionScope(4))
+    // Le clavier permet aussi de confirmer une série depuis son champ numérique.
+    await call((selector) => document.querySelector(selector).focus(), executionField(2, 'loadKg'))
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent.trim()'), 'Série réalisée')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.equal((await executionAt(2)).completed, true, await call((scope) => document.querySelector(scope).textContent, executionScope(2)))
+    const [saved] = await storedWorkouts()
+    assert.equal(saved.exercises[1].sets[1].load, null)
+    assert.equal(saved.status, 'planned')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '5 séries réalisées sur 5')
+    for (const width of [320, 393, 430, 768, 1440]) {
+      await viewport(width, 'tracking-complete', width === 393)
+      const bottom = await evaluate(`(() => {
+        const button = [...document.querySelectorAll('.workout-sessions button')].find(button => button.textContent === 'Retour aux séances')
+        button.scrollIntoView({block: 'end'})
+        const box = button.getBoundingClientRect()
+        return { top: box.top, bottom: box.bottom, height: innerHeight }
+      })()`)
+      assert.ok(bottom.top >= 0 && bottom.bottom <= bottom.height - (width < 960 ? 72 : 0), 'Le dernier contrôle reste accessible au-dessus de la navigation')
+    }
+  })
+
+  await check('J6 : duplication sans réalisation et programmation calculée avec les Records actuels', async () => {
+    const [source] = await storedWorkouts()
+    await click('Retour aux séances')
+    await click('Records', '.primary-nav')
+    await click('Modifier le record', '.exercise-grid > li:nth-child(1)')
+    await enter('#record-snatch', '120')
+    await click('Enregistrer', '.exercise-grid > li:nth-child(1)')
+    await click('Séances', '.primary-nav')
+    await click('Dupliquer', '.workout-session-list')
+    await click('Enregistrer la séance')
+    const [original, copy] = await storedWorkouts()
+    assert.deepEqual(original, source)
+    assert.ok(copy.exercises.every(block => block.sets.every(set => !('execution' in set))))
+    assert.deepEqual(copy.notes, { before: source.notes.before, during: '', after: '' })
+    assert.equal(copy.exercises[0].sets[0].load.selectedKg, 96)
+    assert.equal(copy.status, 'planned')
+    await click('Ouvrir', `[aria-labelledby="card-${copy.id}"]`)
+    await click('Démarrer le suivi')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
+    await click('Retour aux séances')
+    await call((id) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(JSON.parse(localStorage.getItem('liftboard.workouts.v1')).filter(item => item.id === id))), source.id)
+    await reload()
+  })
+
+  await check('J6 : résultats obsolètes de la même série refusés sans écrasement', async () => {
+    await click('Ouvrir', '.workout-session-list')
+    await click('Reprendre le suivi')
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].exercises[0].sets[0].execution = { completed: true, reps: 1, loadKg: 60 }
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    await enter(executionField(0, 'loadKg'), '90')
+    await click('Enregistrer la correction', executionScope(0))
+    assert.match(await call((scope) => document.querySelector(scope).textContent, executionScope(0)), /ont changé ailleurs/)
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 1, loadKg: 60 })
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '90')
+    await click('← Retour à la séance')
+    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Reprendre le suivi')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '60')
+    await click('Retour aux séances')
+  })
+
+  await check('J6 : les notes ne remplacent pas une série saisie si la programmation change ailleurs', async () => {
+    await call((source) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), j6Source)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Démarrer le suivi')
+    await enter(executionField(0, 'loadKg'), '77,')
+    await click('Notes de séance')
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].exercises[0].sets.shift()
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    await enter('textarea', 'Programmation modifiée ailleurs')
+    await click('← Retour au suivi')
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,')
+    assert.equal(await guardActive(), true)
+    await enter(executionField(0, 'loadKg'), '77,5')
+    assert.match(await call((scope) => document.querySelector(scope).textContent, executionScope(0)), /changé depuis son ouverture/)
+    assert.equal((await storedWorkouts())[0].exercises[0].sets.some(set => set.id === 'j6-set-0'), false)
+    assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
+    await click('Retour aux séances')
+    await click('Abandonner la saisie', 'dialog[open]')
+    assert.equal(await guardActive(), false)
+  })
+
+  const fixesSource = {
+    ...structuredClone(j6Source), id: 'fix-workout', title: 'TEST J6',
+    exercises: [{ ...structuredClone(j6Source.exercises[0]), sets: Array.from({ length: 10 }, (_, index) => ({
+      ...structuredClone(j6Source.exercises[0].sets[0]), id: `j6-set-${index}`,
+    })) }],
+  }
+
+  await check('correctifs : libellés explicites, confirmation intacte et restauration directe après F5', async () => {
+    await call(source => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), fixesSource)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    assert.match(await evaluate('document.querySelector(".workout-detail-sets li").textContent'), /Série 1.*3 répétitions · 80 %.*Charge prévue.*80 kg/)
+    assert.equal(await evaluate('getComputedStyle(document.querySelector(".workout-detail-sets")).listStyleType'), 'none')
+    await click('Démarrer le suivi')
+    await click('Série réalisée', executionScope(0))
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 3, loadKg: 80 })
+    const before = await storedWorkouts()
+    await reload()
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST J6')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 10')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '80')
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.deepEqual(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1"))'), { section: 'sessions', trackingWorkoutId: 'fix-workout' })
+  })
+
+  await check('correctifs : flèches depuis les placeholders, précision et champs effacés ou invalides', async () => {
+    await evaluate(`window.addEventListener('keydown', event => { window.lastArrowPrevented = event.defaultPrevented })`)
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowUp'), '80,5')
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowDown'), '80')
+    assert.equal(await arrow(executionField(1, 'reps'), 'ArrowUp'), '4')
+    assert.equal(await arrow(executionField(1, 'reps'), 'ArrowDown'), '3')
+    assert.deepEqual(await executionAt(1), { completed: false, reps: 3, loadKg: 80 })
+    await enter(executionField(1, 'reps'), '1')
+    assert.equal(await arrow(executionField(1, 'reps'), 'ArrowDown'), '1')
+    await enter(executionField(1, 'reps'), '3')
+    await enter(executionField(1, 'loadKg'), '70.1')
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowUp', 4), '72.1')
+    await enter(executionField(1, 'loadKg'), '70,1')
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowDown'), '69,6')
+    await enter(executionField(1, 'loadKg'), '0,5')
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowDown'), '0,5')
+    await enter(executionField(1, 'loadKg'), '')
+    assert.equal(await call(selector => document.querySelector(selector).getAttribute('placeholder'), executionField(1, 'loadKg')), null)
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowUp'), '')
+    assert.equal(await evaluate('window.lastArrowPrevented'), false)
+    assert.deepEqual(await executionAt(1), { completed: false, reps: 3, loadKg: null, cleared: { loadKg: true } })
+    await enter(executionField(1, 'loadKg'), '77,')
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowUp'), '77,')
+    assert.equal(await evaluate('window.lastArrowPrevented'), false)
+    assert.equal(await guardActive(), true)
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 10')
+  })
+
+  await check('correctifs : F5 protégé, restauration du seul stockage et effacement explicite durable', async () => {
+    await reload(true)
+    assert.ok(beforeUnloadPrompts >= 1, 'Chrome a demandé confirmation avant de perdre le texte invalide')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST J6')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(1, 'loadKg')), '')
+    assert.equal(await call(selector => document.querySelector(selector).getAttribute('placeholder'), executionField(1, 'loadKg')), null)
+    assert.equal(await guardActive(), false)
+    await click('Série réalisée', executionScope(1))
+    assert.equal((await executionAt(1)).completed, false)
+    assert.equal(await call(selector => document.querySelector(selector).getAttribute('aria-invalid'), executionField(1, 'loadKg')), 'true')
+    assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowUp'), '')
+    await enter(executionField(1, 'loadKg'), '77,5')
+    await click('Série réalisée', executionScope(1))
+    assert.deepEqual(await executionAt(1), { completed: true, reps: 3, loadKg: 77.5 })
+    await enter(executionField(2, 'reps'), '2')
+    await click('Série réalisée', executionScope(2))
+    assert.deepEqual(await executionAt(2), { completed: true, reps: 2, loadKg: 80 })
+  })
+
+  await check('correctifs : zéro, négatifs et dépassements refusés sans perdre les derniers résultats valides', async () => {
+    await enter(executionField(3, 'reps'), '0')
+    await click('Série réalisée', executionScope(3))
+    assert.equal(await executionAt(3), undefined)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(3, 'reps')), '0')
+    await enter(executionField(3, 'reps'), '2')
+    for (const raw of ['0', '-1', 'Infinity', '9007199254740992', '77,']) {
+      await enter(executionField(3, 'loadKg'), raw)
+      await click('Série réalisée', executionScope(3))
+      assert.deepEqual(await executionAt(3), { completed: false, reps: 2, loadKg: null })
+      assert.equal(await call(selector => document.querySelector(selector).value, executionField(3, 'loadKg')), raw)
+    }
+    assert.equal(await guardActive(), true)
+    await enter(executionField(3, 'loadKg'), '77,5')
+    await click('Série réalisée', executionScope(3))
+    assert.deepEqual(await executionAt(3), { completed: true, reps: 2, loadKg: 77.5 })
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('correctifs : dix sous-cartes lisibles, accessibles et centrées aux cinq largeurs', async () => {
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 10)
+    for (const width of [320, 393, 430, 768, 1440]) {
+      await call(scope => document.querySelector(scope).scrollIntoView({ block: 'start' }), executionScope(0))
+      await viewport(width, 'tracking-cards', width === 393 || width === 1440)
+      assert.ok(await evaluate(`[...document.querySelectorAll('.workout-execution-set')].every(card => {
+        const style = getComputedStyle(card)
+        return parseFloat(style.borderTopWidth) >= 1 && parseFloat(style.paddingTop) >= 8 &&
+          style.backgroundColor !== getComputedStyle(card.parentElement).backgroundColor &&
+          [...card.querySelectorAll('input')].every(input => input.labels.length === 1 && parseFloat(getComputedStyle(input).fontSize) >= 16)
+      })`))
+    }
+  })
+
+  await check('correctifs : mêmes onglets Records et Calculer après F5, puis retour volontaire à la liste', async () => {
+    const before = await storedWorkouts()
+    for (const section of ['Records', 'Calculer']) {
+      await click(section, '.primary-nav')
+      await reload()
+      assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), section)
+      await click('Séances', '.primary-nav')
+      assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST J6')
+      assert.deepEqual(await storedWorkouts(), before)
+    }
+    await click('Retour aux séances')
+    await reload()
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
+    assert.deepEqual(await storedWorkouts(), before)
+  })
+
+  await check('correctifs : anciennes réalisations à zéro accessibles, signalées et corrigeables', async () => {
+    const legacy = structuredClone(fixesSource)
+    legacy.exercises[0].sets[0].execution = { completed: true, reps: 0, loadKg: 0 }
+    const other = { ...structuredClone(j6Source), id: 'other-workout', title: 'Autre séance' }
+    await call((legacy, other) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([legacy, other])), legacy, other)
+    await reload()
+    assert.deepEqual(await storedWorkouts(), [legacy, other])
+    await click('Ouvrir', '[aria-labelledby="card-fix-workout"]')
+    assert.equal(await evaluate('[...document.querySelectorAll("button")].find(button => button.textContent === "Modifier").disabled'), true)
+    assert.equal(await evaluate('document.querySelectorAll("#workout-program-protection").length'), 1)
+    await click('Reprendre le suivi')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'reps')), '0')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '0')
+    assert.match(await call(scope => document.querySelector(scope).textContent, executionScope(0)), /Ancien résultat à corriger/)
+    assert.equal(await guardActive(), false)
+    await click('Notes de séance')
+    await enter('textarea', 'Note malgré ancien zéro')
+    await click('← Retour au suivi')
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 0, loadKg: 0 })
+    await enter(executionField(0, 'reps'), '2')
+    await enter(executionField(0, 'loadKg'), '77,5')
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 0, loadKg: 0 })
+    await click('Enregistrer la correction', executionScope(0))
+    const saved = await storedWorkouts()
+    assert.deepEqual(saved[0].exercises[0].sets[0].execution, { completed: true, reps: 2, loadKg: 77.5 })
+    assert.deepEqual(saved[0].exercises[0].sets[0].load, legacy.exercises[0].sets[0].load)
+    assert.equal(saved[0].notes.during, 'Note malgré ancien zéro')
+    assert.deepEqual(saved[1], other)
+    await reload()
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
+  })
+
+  await check('correctifs : séance supprimée et navigation malformée ramènent à une vue sûre', async () => {
+    const [, other] = await storedWorkouts()
+    await call(other => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([other])), other)
+    await reload()
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+    assert.deepEqual(await storedWorkouts(), [other])
+    assert.equal(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1")).trackingWorkoutId'), null)
+    for (const raw of ['{broken', JSON.stringify({ section: 'unknown', trackingWorkoutId: other.id }), JSON.stringify({ section: 'sessions', trackingWorkoutId: 'deleted' })]) {
+      await call(raw => sessionStorage.setItem('liftboard.navigation.v1', raw), raw)
+      await reload()
+      assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+      assert.deepEqual(await storedWorkouts(), [other])
+    }
+  })
+
+  await check('correctifs : sessionStorage inaccessible sans bloquer la navigation ni la sauvegarde', async () => {
+    const { identifier } = await command('Page.addScriptToEvaluateOnNewDocument', {
+      source: `Object.defineProperty(window, 'sessionStorage', { configurable: true, get() { throw new DOMException('Denied', 'SecurityError') } })`,
+    })
+    try {
+      await reload()
+      assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+      await click('Records', '.primary-nav')
+      await click('Calculer', '.primary-nav')
+      await click('Séances', '.primary-nav')
+      await click('Ouvrir', '.workout-session-list')
+      await click('Démarrer le suivi')
+      await click('Série réalisée', executionScope(0))
+      const before = await storedWorkouts()
+      await reload()
+      assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+      assert.deepEqual(await storedWorkouts(), before)
+    } finally {
+      await command('Page.removeScriptToEvaluateOnNewDocument', { identifier })
+    }
   })
 
   await check('stockage corrompu : message, écritures bloquées et brouillon préservé', async () => {

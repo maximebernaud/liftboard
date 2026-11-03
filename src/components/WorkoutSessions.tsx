@@ -2,17 +2,22 @@ import { useEffect, useRef, useState, type SubmitEvent } from 'react'
 import type { RecordsLoadResult } from '../data/personalRecords'
 import { createWorkout, deleteWorkout, loadWorkouts, sortWorkouts, updateWorkout } from '../data/workouts'
 import { createWorkoutDraft, duplicateWorkoutDraft, validateWorkoutDraft, workoutToDraft } from '../lib/workoutDraft'
+import { hasWorkoutExecution } from '../lib/workoutExecution'
+import { findTrackedWorkout } from '../lib/navigation'
 import type { Workout, WorkoutDraft } from '../types/workout'
 import SectionIcon from './SectionIcon'
 import WorkoutConfirmation from './WorkoutConfirmation'
 import WorkoutDetail from './WorkoutDetail'
 import WorkoutEditor from './WorkoutEditor'
+import WorkoutExecution from './WorkoutExecution'
 import WorkoutQuickNotes from './WorkoutQuickNotes'
 import './WorkoutEditor.css'
 
 type WorkoutSessionsProps = {
   storedRecords: RecordsLoadResult
   onOpenRecords: () => void
+  initialTrackingWorkoutId: string | null
+  onTrackingChange: (id: string | null) => void
 }
 
 function formatWorkoutDate(date: string): string {
@@ -20,15 +25,19 @@ function formatWorkoutDate(date: string): string {
   return `${day}/${month}/${year}`
 }
 
-function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps) {
+function WorkoutSessions({ storedRecords, onOpenRecords, initialTrackingWorkoutId, onTrackingChange }: WorkoutSessionsProps) {
   const [stored, setStored] = useState(() => loadWorkouts())
   const [draft, setDraft] = useState<WorkoutDraft | null>(null)
   const [original, setOriginal] = useState<Workout | null>(null)
   const [duplicateSource, setDuplicateSource] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Workout | null>(null)
-  const [view, setView] = useState<'list' | 'editor' | 'detail' | 'notes'>('list')
+  const [selected, setSelected] = useState<Workout | null>(() =>
+    stored.ok ? findTrackedWorkout(stored.workouts, initialTrackingWorkoutId) : null)
+  const [view, setView] = useState<'list' | 'editor' | 'detail' | 'notes' | 'tracking'>(selected ? 'tracking' : 'list')
+  const [notesReturn, setNotesReturn] = useState<'list' | 'tracking'>('list')
   const [hasEdits, setHasEdits] = useState(false)
   const [pendingNotes, setPendingNotes] = useState(false)
+  const [pendingExecution, setPendingExecution] = useState(false)
+  const [discardExecution, setDiscardExecution] = useState<(() => void) | null>(null)
   const [showErrors, setShowErrors] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -37,6 +46,9 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
   const heading = useRef<HTMLHeadingElement>(null)
   const editorForm = useRef<HTMLFormElement>(null)
   const focusOnViewChange = useRef(false)
+  const trackingId = (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) ? selected?.id ?? null : null
+
+  useEffect(() => { onTrackingChange(trackingId) }, [onTrackingChange, trackingId])
 
   useEffect(() => {
     if (focusOnViewChange.current) {
@@ -46,14 +58,14 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
   }, [view])
 
   useEffect(() => {
-    if (!hasEdits && !pendingNotes) return
+    if (!hasEdits && !pendingNotes && !pendingExecution) return
     function preventDraftLoss(event: BeforeUnloadEvent) {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', preventDraftLoss)
     return () => window.removeEventListener('beforeunload', preventDraftLoss)
-  }, [hasEdits, pendingNotes])
+  }, [hasEdits, pendingNotes, pendingExecution])
 
   function changeView(next: typeof view) {
     setError(null)
@@ -77,14 +89,21 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
     })
   }
 
-  function openWorkout(id: string, nextView: 'detail' | 'notes' = 'detail') {
+  function openWorkout(id: string, nextView: 'detail' | 'notes' | 'tracking' = 'detail') {
     const current = loadWorkouts()
     if (!current.ok) { setError(current.error); return }
     setStored(current)
     const workout = current.workouts.find((item) => item.id === id)
     if (!workout) { setError('Cette séance n’existe plus. La liste a été actualisée.'); return }
     setSelected(workout)
+    if (nextView === 'notes') setNotesReturn('list')
     changeView(nextView)
+  }
+
+  function leaveTracking(nextView: 'detail' | 'list') {
+    const leave = () => { setPendingExecution(false); changeView(nextView) }
+    if (pendingExecution) setDiscardExecution(() => leave)
+    else leave()
   }
 
   function duplicateWorkout(id: string) {
@@ -112,6 +131,10 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
       if (!current.ok) { setError(current.error); return }
       const workout = current.workouts.find((item) => item.id === selected.id)
       if (!workout) { setError('Cette séance n’existe plus.'); return }
+      if (hasWorkoutExecution(workout)) {
+        setError('Le suivi a commencé : la programmation est protégée pour conserver les résultats. Les notes restent modifiables ; dupliquez la séance pour préparer une autre programmation.')
+        return
+      }
       setStored(current)
       setSelected(workout)
       setOriginal(workout)
@@ -167,7 +190,17 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
 
   return (
     <div className="workout-sessions">
-      {view === 'editor' && draft ? (
+      {selected && (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) && (
+        <div hidden={view !== 'tracking'}>
+          <WorkoutExecution key={selected.id} initialWorkout={selected} active={view === 'tracking'} onPendingChange={setPendingExecution}
+            onSaved={(result) => {
+              setStored(result)
+              setSelected(result.workouts.find((item) => item.id === selected.id) ?? selected)
+            }} onBack={() => leaveTracking('detail')} onList={() => leaveTracking('list')}
+            onNotes={() => { setNotesReturn('tracking'); changeView('notes') }} />
+        </div>
+      )}
+      {view === 'tracking' ? null : view === 'editor' && draft ? (
         <>
           <button className="record-button workout-back" type="button" onClick={() => changeView('list')}>
             <span aria-hidden="true">←</span> Retour aux séances
@@ -193,7 +226,8 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
         </>
       ) : view === 'notes' && selected ? (
         <WorkoutQuickNotes key={selected.id} workout={selected} onPendingChange={setPendingNotes}
-          onClose={() => changeView('list')} onSaved={(result) => {
+          returnLabel={notesReturn === 'tracking' ? 'Retour au suivi' : 'Retour aux séances'}
+          onClose={() => changeView(notesReturn)} onSaved={(result) => {
             setStored(result)
             setSelected(result.workouts.find((item) => item.id === selected.id) ?? selected)
           }} />
@@ -205,7 +239,7 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
             <p><time dateTime={selected.date}>{formatWorkoutDate(selected.date)}</time> · {selected.status === 'planned' ? 'Planifiée' : 'Terminée'}</p>
           </div>
           {error && <p className="record-error" role="alert">{error}</p>}
-          <WorkoutDetail workout={selected} onEdit={editWorkout} onNotes={() => openWorkout(selected.id, 'notes')} onDelete={() => {
+          <WorkoutDetail workout={selected} onTrack={() => openWorkout(selected.id, 'tracking')} onEdit={editWorkout} onNotes={() => openWorkout(selected.id, 'notes')} onDelete={() => {
             setDeleteError(null)
             setDeleting(true)
           }} />
@@ -267,6 +301,12 @@ function WorkoutSessions({ storedRecords, onOpenRecords }: WorkoutSessionsProps)
         <WorkoutConfirmation title="Abandonner les modifications ?" confirmLabel="Abandonner les modifications"
           onCancel={() => setDiscard(null)} onConfirm={() => { setDiscard(null); discard() }}>
           <p>Les saisies non enregistrées de <strong>{draft?.title.trim() || 'cette séance'}</strong> seront perdues. La version enregistrée sera conservée.</p>
+        </WorkoutConfirmation>
+      )}
+      {discardExecution && (
+        <WorkoutConfirmation title="Quitter sans enregistrer ?" confirmLabel="Abandonner la saisie"
+          onCancel={() => setDiscardExecution(null)} onConfirm={() => { setDiscardExecution(null); discardExecution() }}>
+          <p>Certaines performances ne sont pas enregistrées. Les saisies invalides, corrections en cours ou écritures en échec seront perdues. Restez dans le suivi pour les corriger ou réessayer. Les résultats déjà enregistrés seront conservés.</p>
         </WorkoutConfirmation>
       )}
     </div>

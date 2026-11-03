@@ -4,11 +4,12 @@ import type { Workout, WorkoutNoteCategory, WorkoutNotes } from '../types/workou
 import WorkoutConfirmation from './WorkoutConfirmation'
 import WorkoutNotesFields from './WorkoutNotesFields'
 
-export default function WorkoutQuickNotes({ workout, onSaved, onPendingChange, onClose }: {
+export default function WorkoutQuickNotes({ workout, onSaved, onPendingChange, onClose, returnLabel = 'Retour aux séances' }: {
   workout: Workout
   onSaved: (result: Extract<WorkoutsResult, { ok: true }>) => void
   onPendingChange: (pending: boolean) => void
   onClose: () => void
+  returnLabel?: string
 }) {
   const [notes, setNotes] = useState<WorkoutNotes>(() => ({ ...workout.notes }))
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +42,7 @@ export default function WorkoutQuickNotes({ workout, onSaved, onPendingChange, o
       <button className="record-button workout-back" type="button" onClick={() => {
         if (Object.keys(pending.current).length) setConfirmClose(true)
         else onClose()
-      }}><span aria-hidden="true">←</span> Retour aux séances</button>
+      }}><span aria-hidden="true">←</span> {returnLabel}</button>
       <div className="page-heading">
         <h1 id="workout-page-title">Notes de séance</h1>
         <p>{workout.title}</p>

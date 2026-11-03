@@ -231,7 +231,8 @@
   display: grid;
   gap: var(--lb-space-4);
   margin: 0;
-  padding-inline-start: var(--lb-space-6);
+  padding: 0;
+  list-style: none;
 }
 
 .workout-detail-sets .workout-set-result {
@@ -287,6 +288,73 @@
 .workout-field textarea {
   resize: vertical;
   line-height: var(--lb-leading-base);
+}
+
+.workout-execution-set {
+  display: grid;
+  min-width: 0;
+  gap: var(--lb-space-2);
+  padding: var(--lb-space-3);
+  border: var(--lb-border-width) solid var(--lb-color-control-border);
+  border-radius: var(--lb-radius-md);
+  background: var(--lb-color-raised);
+}
+
+.workout-execution-set h3 {
+  font-size: var(--lb-text-base);
+  font-weight: 600;
+}
+
+.workout-execution-planned {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--lb-space-2);
+  padding: var(--lb-space-2);
+  border-radius: var(--lb-radius-sm);
+  background: var(--lb-color-surface);
+}
+
+.workout-execution-set .workout-field input {
+  background: var(--lb-color-surface);
+}
+
+.workout-card-actions > button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workout-execution-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.workout-execution-fields legend {
+  margin-bottom: var(--lb-space-2);
+  font-weight: 600;
+}
+
+.workout-execution-completed {
+  color: var(--lb-color-success);
+}
+
+.workout-execution-progress {
+  font-family: var(--lb-font-display);
+  font-size: var(--lb-text-xl);
+  font-weight: 600;
+}
+
+.workout-sessions progress {
+  width: 100%;
+  height: var(--lb-space-2);
+  accent-color: var(--lb-color-accent);
+}
+
+.workout-execution-set input::placeholder {
+  color: var(--lb-color-text-muted);
+  opacity: 1;
 }
 
 @media (min-width: 640px) {

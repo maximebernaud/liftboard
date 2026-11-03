@@ -3,6 +3,27 @@ import { describe, it } from 'node:test'
 import { handleNumericArrow, stepNumericInput, type NumericField } from '../src/lib/numericInput.ts'
 
 describe('incréments numériques', () => {
+  it('réutilise les pas du suivi avec des valeurs strictement positives et sûres', () => {
+    assert.equal(stepNumericInput('3', 'execution-reps', 1), '4')
+    assert.equal(stepNumericInput('3', 'execution-reps', -1), '2')
+    assert.equal(stepNumericInput('1', 'execution-reps', -1), '1')
+    assert.equal(stepNumericInput('80', 'execution-load', 1), '80,5')
+    assert.equal(stepNumericInput('80,5', 'execution-load', -1), '80')
+    assert.equal(stepNumericInput('70.1', 'execution-load', 1), '70.6')
+    assert.equal(stepNumericInput('0,5', 'execution-load', -1), '0,5')
+    assert.equal(stepNumericInput(String(Number.MAX_SAFE_INTEGER), 'execution-load', 1), String(Number.MAX_SAFE_INTEGER))
+    assert.equal(stepNumericInput(String(Number.MAX_SAFE_INTEGER), 'execution-load', -1), String(Number.MAX_SAFE_INTEGER))
+    assert.equal(stepNumericInput(String(Number.MAX_SAFE_INTEGER), 'execution-reps', 1), String(Number.MAX_SAFE_INTEGER))
+    for (const field of ['execution-reps', 'execution-load'] as const) {
+      for (const raw of ['', '0', '-1', '77,', 'abc', 'Infinity', 'NaN', '9007199254740992']) {
+        assert.equal(stepNumericInput(raw, field, 1), null)
+      }
+    }
+    let raw = '70,1'
+    for (let index = 0; index < 100; index++) raw = stepNumericInput(raw, 'execution-load', 1)!
+    assert.equal(raw, '120,1')
+  })
+
   it('ajoute ou retire un demi-kilo aux Records et un demi-point aux intensités', () => {
     for (const field of ['record', 'intensity'] as const) {
       assert.equal(stepNumericInput('70', field, 1), '70,5')

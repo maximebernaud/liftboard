@@ -12,7 +12,7 @@ import WorkoutQuickNotes from './WorkoutQuickNotes'
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 export type HistoryView = { workoutId: string | null; notes: boolean }
 
-export default function WorkoutHistory({ stored, onStoredChange, onSessions, onReopened, filters, onFiltersChange, view, onViewChange }: {
+export default function WorkoutHistory({ stored, onStoredChange, onSessions, onReopened, filters, onFiltersChange, view, onViewChange, onPendingChange }: {
   stored: WorkoutsResult
   onStoredChange: (result: WorkoutsResult) => void
   onSessions: () => void
@@ -21,6 +21,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   onFiltersChange: (filters: HistoryFilters) => void
   view: HistoryView
   onViewChange: (view: HistoryView) => void
+  onPendingChange: (pending: boolean) => void
 }) {
   const selectedId = view.workoutId
   const [notesWorkout, setNotesWorkout] = useState<Workout | null>(null)
@@ -33,6 +34,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   const completed = stored.ok ? stored.workouts.filter((item) => item.status === 'completed') : []
   const filtered = sortWorkouts(filterWorkoutHistory(completed, filters))
   const hasFilters = Boolean(filters.exerciseId || filters.date)
+  useEffect(() => { onPendingChange(pendingNotes) }, [pendingNotes, onPendingChange])
 
   useEffect(() => {
     if (!pendingNotes) return

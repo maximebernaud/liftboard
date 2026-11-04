@@ -51,13 +51,18 @@ export function isWorkout(value: unknown): value is Workout {
   })
 }
 
+export function isWorkouts(value: unknown): value is Workout[] {
+  return Array.isArray(value) && value.every(isWorkout) &&
+    new Set(value.map((item) => item.id)).size === value.length
+}
+
 export function loadWorkouts(storage?: WorkoutStorage): WorkoutsResult {
   try {
     const raw = (storage ?? window.localStorage).getItem(workoutsStorageKey)
     if (raw === null) return { ok: true, workouts: [] }
     let data: unknown
     try { data = JSON.parse(raw) } catch { return fail(invalidData) }
-    if (!Array.isArray(data) || !data.every(isWorkout) || new Set(data.map((item) => item.id)).size !== data.length) {
+    if (!isWorkouts(data)) {
       return fail(invalidData)
     }
     return { ok: true, workouts: data }

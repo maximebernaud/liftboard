@@ -16,7 +16,7 @@ export type RecordsLoadResult =
   | { records: PersonalRecord[]; error: null }
   | { records: null; error: string }
 
-const storageKey = 'liftboard.personal-records.v1'
+export const recordsStorageKey = 'liftboard.personal-records.v1'
 
 export function parseOneRepMax(input: string): number | null {
   const trimmed = input.trim()
@@ -42,17 +42,18 @@ function isPersonalRecord(value: unknown): value is PersonalRecord {
   )
 }
 
-export function loadPersonalRecords(): RecordsLoadResult {
+export function isPersonalRecords(value: unknown): value is PersonalRecord[] {
+  return Array.isArray(value) && value.every(isPersonalRecord) &&
+    new Set(value.map((record) => record.exerciseId)).size === value.length
+}
+
+export function loadPersonalRecords(storage?: Pick<Storage, 'getItem'>): RecordsLoadResult {
   try {
-    const stored = window.localStorage.getItem(storageKey)
+    const stored = (storage ?? window.localStorage).getItem(recordsStorageKey)
     if (stored === null) return { records: [], error: null }
 
     const parsed: unknown = JSON.parse(stored)
-    if (
-      !Array.isArray(parsed) ||
-      !parsed.every(isPersonalRecord) ||
-      new Set(parsed.map((record) => record.exerciseId)).size !== parsed.length
-    ) {
+    if (!isPersonalRecords(parsed)) {
       return {
         records: null,
         error: 'Les records stockés sont invalides. Ils ont été conservés sans modification.',
@@ -70,5 +71,5 @@ export function loadPersonalRecords(): RecordsLoadResult {
 
 export function savePersonalRecords(records: PersonalRecord[]): void {
   // Laisser remonter l'erreur : l'interface ne doit confirmer que les écritures réussies.
-  window.localStorage.setItem(storageKey, JSON.stringify(records))
+  window.localStorage.setItem(recordsStorageKey, JSON.stringify(records))
 }

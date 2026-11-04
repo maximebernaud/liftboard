@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react'
 import type { RecordsLoadResult } from '../data/personalRecords'
 import { createWorkout, deleteWorkout, loadWorkouts, sortWorkouts, updateWorkout, type WorkoutsResult } from '../data/workouts'
 import { createWorkoutDraft, duplicateWorkoutDraft, validateWorkoutDraft, workoutToDraft } from '../lib/workoutDraft'
@@ -27,9 +27,11 @@ type WorkoutSessionsProps = {
   stored: WorkoutsResult
   onStoredChange: (result: WorkoutsResult) => void
   onCompleted: (result: Extract<WorkoutsResult, { ok: true }>, id: string) => void
+  onPendingChange: (pending: boolean) => void
+  backupPanel: ReactNode
 }
 
-function WorkoutSessions({ storedRecords, onOpenRecords, screen, onScreenChange, onTrackingChange, stored, onStoredChange: setStored, onCompleted }: WorkoutSessionsProps) {
+function WorkoutSessions({ storedRecords, onOpenRecords, screen, onScreenChange, onTrackingChange, stored, onStoredChange: setStored, onCompleted, onPendingChange, backupPanel }: WorkoutSessionsProps) {
   const [draft, setDraft] = useState<WorkoutDraft | null>(null)
   const [original, setOriginal] = useState<Workout | null>(null)
   const [duplicateSource, setDuplicateSource] = useState<string | null>(null)
@@ -54,6 +56,7 @@ function WorkoutSessions({ storedRecords, onOpenRecords, screen, onScreenChange,
   const trackingId = editable && (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) ? selected?.id ?? null : null
 
   useEffect(() => { onTrackingChange(trackingId) }, [onTrackingChange, trackingId])
+  useEffect(() => { onPendingChange(Boolean(draft) || pendingNotes || pendingExecution) }, [draft, pendingNotes, pendingExecution, onPendingChange])
 
   useEffect(() => {
     if (focusOnViewChange.current) {
@@ -306,6 +309,7 @@ function WorkoutSessions({ storedRecords, onOpenRecords, screen, onScreenChange,
               ))}
             </ul>
           )}
+          {backupPanel}
         </>
       )}
       {deleting && selected && (

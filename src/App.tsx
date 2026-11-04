@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Calculator from './components/Calculator'
+import DataBackup, { type BackupNotice } from './components/DataBackup'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
@@ -31,6 +32,11 @@ function App() {
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({ exerciseId: '', date: '' })
   const [historyView, setHistoryView] = useState<HistoryView>({ workoutId: null, notes: false })
   const [returnToWorkout, setReturnToWorkout] = useState(false)
+  const [dataRevision, setDataRevision] = useState(0)
+  const [pendingRecords, setPendingRecords] = useState(false)
+  const [pendingSessions, setPendingSessions] = useState(false)
+  const [pendingHistory, setPendingHistory] = useState(false)
+  const [backupNotice, setBackupNotice] = useState<BackupNotice>(null)
   const recordsNavButton = useRef<HTMLButtonElement>(null)
   const sessionsNavButton = useRef<HTMLButtonElement>(null)
   const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0]
@@ -93,6 +99,27 @@ function App() {
     sessionsNavButton.current?.focus({ preventScroll: true })
   }
 
+  function refreshAfterRestore(error?: string) {
+    setStoredRecords(loadPersonalRecords())
+    setStoredWorkouts(loadWorkouts())
+    setSessionsScreen({ selected: null, view: 'list' })
+    setHistoryView({ workoutId: null, notes: false })
+    setHistoryFilters({ exerciseId: '', date: '' })
+    setReturnToWorkout(false)
+    setWorkoutNotice(null)
+    setPendingRecords(false)
+    setPendingSessions(false)
+    setPendingHistory(false)
+    setNavigation({ section: 'sessions', trackingWorkoutId: null })
+    // Remonter les composants métier écarte leurs anciennes copies en mémoire.
+    setDataRevision((current) => current + 1)
+    setBackupNotice({ message: error ?? 'Vos données ont été restaurées sur cet appareil.', error: Boolean(error) })
+    requestAnimationFrame(() => {
+      document.getElementById('workout-page-title')?.focus({ preventScroll: true })
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    })
+  }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -151,17 +178,23 @@ function App() {
         )}
 
         <section hidden={activeSection !== 'sessions'} aria-label="Séances">
-          <WorkoutSessions storedRecords={storedRecords} onOpenRecords={openWorkoutRecords}
+          <WorkoutSessions key={dataRevision} storedRecords={storedRecords} onOpenRecords={openWorkoutRecords}
             stored={storedWorkouts} onStoredChange={setStoredWorkouts} onCompleted={finishWorkout}
-            screen={sessionsScreen} onScreenChange={setSessionsScreen} onTrackingChange={setTrackingWorkoutId} />
+            screen={sessionsScreen} onScreenChange={setSessionsScreen} onTrackingChange={setTrackingWorkoutId}
+            onPendingChange={setPendingSessions} backupPanel={<DataBackup
+              restoreBlocked={pendingRecords || pendingSessions || pendingHistory}
+              notice={backupNotice} onNoticeChange={setBackupNotice}
+              onRestored={() => refreshAfterRestore()} onRecoveryFailed={refreshAfterRestore} />} />
         </section>
 
         {/* Garder les saisies en cours lorsque l'utilisateur change de section. */}
         <section hidden={activeSection !== 'records'} aria-label="Records personnels">
           <PersonalRecords
+            key={dataRevision}
             storedRecords={storedRecords}
             onPersist={persistRecords}
             onReload={() => setStoredRecords(loadPersonalRecords())}
+            onPendingChange={setPendingRecords}
           />
         </section>
 
@@ -174,8 +207,9 @@ function App() {
 
         <section hidden={activeSection !== 'history'} aria-label="Historique des séances">
           {workoutNotice && activeSection === 'history' && <p className="workout-notice" role="status">{workoutNotice}</p>}
-          <WorkoutHistory stored={storedWorkouts} onStoredChange={setStoredWorkouts} onSessions={resumeWorkout}
+          <WorkoutHistory key={dataRevision} stored={storedWorkouts} onStoredChange={setStoredWorkouts} onSessions={resumeWorkout}
             filters={historyFilters} onFiltersChange={setHistoryFilters} view={historyView} onViewChange={setHistoryView}
+            onPendingChange={setPendingHistory}
             onReopened={(result, id) => {
               setStoredWorkouts(result)
               setSessionsScreen({ selected: findTrackedWorkout(result.workouts, id), view: 'detail' })

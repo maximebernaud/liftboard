@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   exercises,
   type Exercise,
@@ -11,10 +11,12 @@ type PersonalRecordsProps = {
   storedRecords: RecordsLoadResult
   onPersist: (records: PersonalRecord[]) => string | null
   onReload: () => void
+  onPendingChange: (pending: boolean) => void
 }
 
-function PersonalRecords({ storedRecords, onPersist, onReload }: PersonalRecordsProps) {
+function PersonalRecords({ storedRecords, onPersist, onReload, onPendingChange }: PersonalRecordsProps) {
   const [editingExerciseId, setEditingExerciseId] = useState<Exercise['id'] | null>(null)
+  useEffect(() => { onPendingChange(editingExerciseId !== null) }, [editingExerciseId, onPendingChange])
 
   const { records, error } = storedRecords
 

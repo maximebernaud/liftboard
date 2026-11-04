@@ -3,14 +3,15 @@
 // Démarrer Vite, puis : node tests/workouts.browser.mjs http://127.0.0.1:5173
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:5173'
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(baseUrl).hostname), 'Utiliser uniquement un serveur local de test')
 const chromePath = process.env.LIFTBOARD_TEST_CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-const artifactDirectory = await mkdtemp(join(tmpdir(), 'liftboard-j6-test-'))
+const artifactDirectory = await mkdtemp(join(tmpdir(), 'liftboard-j7-test-'))
+console.log(`Profil et fichiers de test isolés : ${artifactDirectory}`)
 const browser = spawn(chromePath, [
   '--headless=new', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
   `--user-data-dir=${join(artifactDirectory, 'profile')}`, '--no-first-run', '--no-default-browser-check',
@@ -24,6 +25,7 @@ const browserErrors = []
 let passed = 0
 let acceptBeforeUnload = false
 let beforeUnloadPrompts = 0
+let fileChooserPrompts = 0
 
 function command(method, params = {}) {
   return new Promise((resolve, reject) => {
@@ -112,6 +114,40 @@ async function check(label, action) {
   console.log(`✓ ${label}`)
 }
 
+async function chooseBackup(path) {
+  const before = fileChooserPrompts
+  // L'activation au clavier ou au pointeur place le focus sur le déclencheur.
+  await call(() => [...document.querySelectorAll('.data-backup button')]
+    .find(button => button.textContent === 'Restaurer une sauvegarde').focus({ preventScroll: true }))
+  await click('Restaurer une sauvegarde', '.data-backup')
+  assert.equal(fileChooserPrompts, before + 1, 'Le bouton ouvre le sélecteur natif')
+  const { root } = await command('DOM.getDocument')
+  const { nodeId } = await command('DOM.querySelector', { nodeId: root.nodeId, selector: '.data-backup input[type=file]' })
+  await command('DOM.setFileInputFiles', { nodeId, files: [path] })
+  for (let attempt = 0; attempt < 80; attempt++) {
+    await settle()
+    if (await evaluate('document.querySelector(".data-backup").getAttribute("aria-busy") === "false" && Boolean(document.querySelector(".data-backup dialog[open], .data-backup > .record-error"))')) return
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error('La sélection de sauvegarde ne se termine pas')
+}
+
+async function downloadCurrentBackup() {
+  // Chrome peut remplacer un téléchargement de même nom : isoler chaque export.
+  const downloadDirectory = await mkdtemp(join(artifactDirectory, 'download-'))
+  await command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadDirectory })
+  await click('Exporter mes données', '.data-backup')
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const filename = (await readdir(downloadDirectory)).find(name => name.endsWith('.json'))
+    if (filename) {
+      const path = join(downloadDirectory, filename)
+      return { path, backup: JSON.parse(await readFile(path, 'utf8')) }
+    }
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error('Aucun fichier JSON effectivement téléchargé')
+}
+
 async function viewport(width, name, screenshot = false) {
   await command('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 960 })
   await settle()
@@ -153,6 +189,7 @@ try {
   socket = new WebSocket(target.webSocketDebuggerUrl)
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data)
+    if (message.method === 'Page.fileChooserOpened') fileChooserPrompts++
     if (message.method === 'Page.javascriptDialogOpening' && message.params.type === 'beforeunload' && acceptBeforeUnload) {
       beforeUnloadPrompts++
       void command('Page.handleJavaScriptDialog', { accept: true }).catch(error => browserErrors.push(String(error)))
@@ -171,7 +208,184 @@ try {
   })
   await command('Page.enable')
   await command('Runtime.enable')
+  await command('Page.setInterceptFileChooserDialog', { enabled: true })
+  await command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: artifactDirectory })
   await waitForApp()
+
+  // J7 : toutes les écritures et tous les téléchargements utilisent ce profil temporaire.
+  const j7records = [{ exerciseId: 'snatch', oneRepMaxKg: 82.5 }]
+  const j7planned = {
+    id: 'j7-planned', title: 'J7 <script>texte seulement</script>', date: '2026-11-04', status: 'planned',
+    notes: { before: '  Avant\nDeuxième ligne\n', during: 'Pendant 💪', after: 'Après' },
+    exercises: [{ id: 'j7-block', exerciseId: 'snatch', sets: [
+      { id: 'j7-set', reps: 3, intensityPct: 73.3, rounding: { mode: 'up', increment: 2.5 }, load: { exactKg: 60.4725, selectedKg: 62.5 }, execution: { completed: true, reps: 2, loadKg: 65 } },
+      { id: 'j7-partial', reps: 2, intensityPct: 80, rounding: { mode: 'exact' }, load: null, execution: { completed: false, reps: null, loadKg: null, cleared: { loadKg: true } } },
+    ] }],
+  }
+  const j7completed = { ...structuredClone(j7planned), id: 'j7-completed', status: 'completed' }
+  j7completed.exercises[0].sets[0].execution = { completed: true, reps: 0, loadKg: 0 }
+  let j7download
+  const snapshotBusiness = () => evaluate('({records: localStorage.getItem("liftboard.personal-records.v1"), workouts: localStorage.getItem("liftboard.workouts.v1"), unrelated: localStorage.getItem("j7-unrelated")})')
+
+  await check('J7 : export réellement téléchargé sur navigateur vierge, sans mutation', async () => {
+    const before = await snapshotBusiness()
+    const { backup } = await downloadCurrentBackup()
+    assert.equal(backup.format, 'liftboard.backup')
+    assert.equal(backup.version, 1)
+    assert.deepEqual(backup.data, { records: [], workouts: [] })
+    assert.deepEqual(await snapshotBusiness(), before)
+    assert.equal(await evaluate('document.querySelectorAll(".primary-nav button").length'), 4)
+  })
+
+  await check('J7 : export fidèle de toutes les données enregistrées, sans autre clé', async () => {
+    await call((records, workouts) => {
+      localStorage.setItem('liftboard.personal-records.v1', JSON.stringify(records))
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+      localStorage.setItem('j7-unrelated', 'Ne pas exporter')
+    }, j7records, [j7planned, j7completed])
+    await reload()
+    const before = await snapshotBusiness()
+    j7download = await downloadCurrentBackup()
+    assert.deepEqual(j7download.backup.data, { records: j7records, workouts: [j7planned, j7completed] })
+    assert.equal(JSON.stringify(j7download.backup).includes('Ne pas exporter'), false)
+    assert.deepEqual(await snapshotBusiness(), before)
+    for (const width of [320, 393, 430, 768, 1440]) await viewport(width, 'j7-backup', width === 320 || width === 1440)
+  })
+
+  await check('J7 : sélection native, aperçu complet et annulation sans changement', async () => {
+    const before = await snapshotBusiness()
+    await chooseBackup(j7download.path)
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".data-backup-summary dd")].map(e => e.textContent)'), ['1', '1', '1'])
+    assert.match(await evaluate('document.querySelector(".data-backup dialog").textContent'), /remplacera vos Records et vos séances.*ne peut pas être annulée automatiquement/s)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
+    for (const width of [320, 393, 430, 768, 1440]) await viewport(width, 'j7-preview', width === 320)
+    await click('Annuler', 'dialog[open]')
+    assert.deepEqual(await snapshotBusiness(), before)
+    assert.equal(await evaluate('document.querySelector(".data-backup dialog")'), null)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Restaurer une sauvegarde')
+  })
+
+  await check('J7 : fichiers JSON invalides, version incompatible et données corrompues refusés sans écriture', async () => {
+    const before = await snapshotBusiness()
+    const duplicate = structuredClone(j7download.backup)
+    duplicate.data.workouts.push(duplicate.data.workouts[0])
+    for (const [name, content] of [
+      ['invalid.json', '{invalide'],
+      ['version.json', JSON.stringify({ ...j7download.backup, version: 99 })],
+      ['duplicate.json', JSON.stringify(duplicate)],
+    ]) {
+      const path = join(artifactDirectory, name)
+      await writeFile(path, content)
+      await chooseBackup(path)
+      assert.equal(await evaluate('Boolean(document.querySelector(".data-backup > .record-error"))'), true)
+      assert.deepEqual(await snapshotBusiness(), before)
+      assert.equal(await evaluate('document.querySelector(".data-backup dialog")'), null)
+    }
+  })
+
+  await check('J7 : un brouillon de séance reste protégé pendant la confirmation', async () => {
+    await click('+ Nouvelle séance')
+    await enter('#workout-title', 'Brouillon à préserver')
+    await click('← Retour aux séances')
+    const before = await snapshotBusiness()
+    await chooseBackup(j7download.path)
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /saisie.*en cours/s)
+    assert.deepEqual(await snapshotBusiness(), before)
+    await click('Annuler', 'dialog[open]')
+    await click('Reprendre le brouillon')
+    assert.equal(await evaluate('document.querySelector("#workout-title").value'), 'Brouillon à préserver')
+    await click('Annuler', '.workout-editor')
+    await click('Abandonner les modifications', 'dialog[open]')
+  })
+
+  await check('J7 : la saisie Records masquée est protégée et reste intacte après annulation', async () => {
+    await click('Records', '.primary-nav')
+    await click('Modifier le record', '.exercise-card')
+    await enter('#record-snatch', '999')
+    await click('Séances', '.primary-nav')
+    const before = await snapshotBusiness()
+    await chooseBackup(j7download.path)
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /saisie.*en cours/s)
+    assert.deepEqual(await snapshotBusiness(), before)
+    await click('Annuler', 'dialog[open]')
+    await click('Records', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '999')
+    await click('Annuler', '.exercise-card')
+    await click('Séances', '.primary-nav')
+  })
+
+  await check('J7 : une note historique non enregistrée et masquée bloque le remplacement', async () => {
+    await click('Historique', '.primary-nav')
+    await click('Consulter la séance', '.workout-history')
+    await click('Notes', '.workout-history')
+    await evaluate(`window.j7setItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new Error('Denied'); return window.j7setItem.call(this, key, value)
+    }`)
+    await enter('.workout-history textarea', 'J7 : note en attente')
+    await evaluate('Storage.prototype.setItem = window.j7setItem')
+    await click('Séances', '.primary-nav')
+    const before = await snapshotBusiness()
+    await chooseBackup(j7download.path)
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /saisie.*en cours/s)
+    assert.deepEqual(await snapshotBusiness(), before)
+    await click('Annuler', 'dialog[open]')
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector(".workout-history textarea").value'), 'J7 : note en attente')
+    await click('Réessayer', '.workout-history')
+    await click('← Retour à la séance', '.workout-history')
+    await click('Séances', '.primary-nav')
+  })
+
+  await check('J7 : échec partiel de quota, récupération vérifiée puis restauration complète et F5', async () => {
+    const before = await snapshotBusiness()
+    await chooseBackup(j7download.path)
+    await evaluate(`window.j7failOnce = true; window.j7setItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1' && window.j7failOnce) { window.j7failOnce = false; throw new DOMException('Full', 'QuotaExceededError') }
+      return window.j7setItem.call(this, key, value)
+    }`)
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /plein.*rétablies/s)
+    assert.deepEqual(await snapshotBusiness(), before)
+    await evaluate('Storage.prototype.setItem = window.j7setItem')
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+    assert.match(await evaluate('document.querySelector(".data-backup [role=status]").textContent'), /restaurées/)
+    assert.deepEqual(await storedWorkouts(), j7download.backup.data.workouts)
+    await click('Records', '.primary-nav')
+    assert.match(await evaluate('document.querySelector(".exercise-record").textContent'), /82,5/)
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-history .workout-session-list li").length'), 1)
+    await click('Séances', '.primary-nav')
+    await reload()
+    assert.deepEqual(await storedWorkouts(), j7download.backup.data.workouts)
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('J7 : restauration du fichier téléchargé sur un stockage vierge', async () => {
+    await call(() => {
+      localStorage.removeItem('liftboard.personal-records.v1')
+      localStorage.removeItem('liftboard.workouts.v1')
+    })
+    await reload()
+    await chooseBackup(j7download.path)
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), [j7planned, j7completed])
+    assert.deepEqual(await evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1"))'), j7records)
+    assert.equal(await evaluate('localStorage.getItem("j7-unrelated")'), 'Ne pas exporter')
+  })
+
+  await check('J7 : remplacement par une sauvegarde vide, avant les régressions J5/J6', async () => {
+    const path = join(artifactDirectory, 'empty.json')
+    await writeFile(path, JSON.stringify({ ...j7download.backup, data: { records: [], workouts: [] } }))
+    await chooseBackup(path)
+    await click('Restaurer mes données', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), [])
+    assert.deepEqual(await evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1"))'), [])
+    await reload()
+  })
 
   await check('état vide, navigation et record 1RM', async () => {
     assert.deepEqual(await storedWorkouts(), [])

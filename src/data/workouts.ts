@@ -2,6 +2,7 @@ import { exercises } from './personalRecords.ts'
 import { isValidWorkoutDate, isWorkoutSetRounding } from '../lib/workoutDraft.ts'
 import { roundLoadDirected } from '../lib/loadCalculator.ts'
 import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution, workoutProgramSignature } from '../lib/workoutExecution.ts'
+import { workoutCompletionError } from '../lib/workoutHistory.ts'
 import type { Workout, WorkoutNotes, WorkoutNoteCategory, WorkoutSetExecution } from '../types/workout.ts'
 
 export const workoutsStorageKey = 'liftboard.workouts.v1'
@@ -93,6 +94,7 @@ export function updateWorkout(workout: Workout, original: Workout, storage?: Wor
   if (!current.ok) return current
   const latest = current.workouts.find((item) => item.id === workout.id)
   if (!latest) return fail('Cette séance n’existe plus. Vos saisies sont conservées en mémoire.')
+  if (latest.status !== 'planned' || original.status !== 'planned') return fail('Cette séance est terminée. Réouvrez-la depuis l’Historique avant de modifier sa programmation.')
   if (hasWorkoutExecution(latest) || hasWorkoutExecution(original) || hasWorkoutExecution(workout)) {
     return fail('Le suivi de cette séance a commencé. Sa programmation est protégée pour conserver les résultats. Les notes restent modifiables ; dupliquez la séance pour préparer une autre programmation.')
   }
@@ -115,7 +117,7 @@ export function deleteWorkout(id: string, storage?: WorkoutStorage): WorkoutsRes
   return writeWorkouts(current.workouts.filter((item) => item.id !== id), storage)
 }
 
-export function updateWorkoutNotes(id: string, patch: Partial<WorkoutNotes>, storage?: WorkoutStorage): WorkoutsResult {
+export function updateWorkoutNotes(id: string, patch: Partial<WorkoutNotes>, storage?: WorkoutStorage, originalNotes?: WorkoutNotes): WorkoutsResult {
   const categories = Object.keys(patch)
   if (!identifier(id) || !categories.length || categories.some((key) =>
     !['before', 'during', 'after'].includes(key) || typeof patch[key as WorkoutNoteCategory] !== 'string')) {
@@ -123,7 +125,12 @@ export function updateWorkoutNotes(id: string, patch: Partial<WorkoutNotes>, sto
   }
   const current = loadWorkouts(storage)
   if (!current.ok) return current
-  if (!current.workouts.some((item) => item.id === id)) return fail('Cette séance n’existe plus. La note reste uniquement en mémoire.')
+  const latest = current.workouts.find((item) => item.id === id)
+  if (!latest) return fail('Cette séance n’existe plus. La note reste uniquement en mémoire.')
+  if (originalNotes && categories.some((key) => {
+    const category = key as WorkoutNoteCategory
+    return latest.notes[category] !== originalNotes[category] && latest.notes[category] !== patch[category]
+  })) return fail('Cette note a changé ailleurs. Votre saisie reste en mémoire. Revenez à la séance puis rouvrez les notes pour consulter la version enregistrée.')
   return writeWorkouts(current.workouts.map((item) => item.id === id ? { ...item, notes: { ...item.notes, ...patch } } : item), storage)
 }
 
@@ -168,4 +175,35 @@ export function updateWorkoutSetExecution(
 export function sortWorkouts(workouts: Workout[]): Workout[] {
   // Le tri natif est stable : l'ordre d'enregistrement départage les dates égales.
   return [...workouts].sort((left, right) => right.date.localeCompare(left.date))
+}
+
+/** Changer uniquement le statut de la version relue, sans écraser les notes récentes. */
+function transitionWorkoutStatus(original: Workout, status: Workout['status'], storage?: WorkoutStorage): WorkoutsResult {
+  if (!isWorkout(original)) return fail('Séance invalide. Aucun changement de statut enregistré.')
+  const expected = status === 'completed' ? 'planned' : 'completed'
+  const current = loadWorkouts(storage)
+  if (!current.ok) return current
+  const latest = current.workouts.find((item) => item.id === original.id)
+  if (!latest) return fail('Cette séance n’existe plus. Aucun changement de statut enregistré.')
+  if (original.status !== expected || latest.status !== expected) {
+    return fail('Le statut de cette séance a changé. Revenez à la liste pour consulter la version actuelle. Aucun changement enregistré.')
+  }
+  if (workoutProgramSignature(latest) !== workoutProgramSignature(original) ||
+    latest.exercises.some((block, index) => block.sets.some((set, number) =>
+      !sameExecution(set.execution, original.exercises[index].sets[number].execution)))) {
+    return fail('La programmation ou les performances de cette séance ont changé. Revenez à la liste puis consultez la version actuelle avant de confirmer à nouveau.')
+  }
+  if (status === 'completed') {
+    const error = workoutCompletionError(latest)
+    if (error) return fail(error)
+  }
+  return writeWorkouts(current.workouts.map((item) => item.id === latest.id ? { ...item, status } : item), storage)
+}
+
+export function completeWorkout(original: Workout, storage?: WorkoutStorage): WorkoutsResult {
+  return transitionWorkoutStatus(original, 'completed', storage)
+}
+
+export function reopenWorkout(original: Workout, storage?: WorkoutStorage): WorkoutsResult {
+  return transitionWorkoutStatus(original, 'planned', storage)
 }

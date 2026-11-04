@@ -16,16 +16,16 @@ import WorkoutNotesFields from './WorkoutNotesFields'
 
 // Un seul contrôle combine le pas et la direction pour rester compact sur mobile.
 const roundingOptions: { value: string; label: string; rounding: WorkoutSetRounding }[] = [
-  { value: 'exact', label: 'Exacte', rounding: { mode: 'exact' } },
+  { value: 'exact', label: 'Sans arrondi', rounding: { mode: 'exact' } },
   ...roundingIncrements.flatMap((increment) => [
     {
       value: `down-${increment}`,
-      label: `Inférieur · ${increment.toString().replace('.', ',')} kg`,
+      label: `Vers le bas · ${increment.toString().replace('.', ',')} kg`,
       rounding: { mode: 'down' as const, increment },
     },
     {
       value: `up-${increment}`,
-      label: `Supérieur · ${increment.toString().replace('.', ',')} kg`,
+      label: `Vers le haut · ${increment.toString().replace('.', ',')} kg`,
       rounding: { mode: 'up' as const, increment },
     },
   ]),
@@ -134,10 +134,11 @@ function ExerciseBlock({ block, number, errors, storedRecords, onChange, onRemov
         {storedRecords.records === null ? (
           <p className="record-error">Records indisponibles. Le calcul est en attente.</p>
         ) : record ? (
-          <p>Record 1RM : <strong>{record.oneRepMaxKg.toString().replace('.', ',')} kg</strong></p>
+          <p>Record actuel (1RM) : <strong>{record.oneRepMaxKg.toString().replace('.', ',')} kg</strong></p>
         ) : (
           <p>Record à renseigner</p>
         )}
+        {block.sets.some((set) => set.savedLoad !== undefined) && <p>Les charges déjà enregistrées restent figées. Le record actuel s’applique aux nouveaux calculs.</p>}
         {(!record || storedRecords.records === null) && (
           <button className="record-button" type="button" onClick={onOpenRecords}>
             Ouvrir les Records
@@ -175,7 +176,7 @@ function ExerciseBlock({ block, number, errors, storedRecords, onChange, onRemov
                 />
                 <DraftField
                   id={`${setId}-intensity`}
-                  label="Intensité (%)"
+                  label="Intensité (% du 1RM)"
                   inputMode="decimal"
                   value={set.intensityInput}
                   error={fieldErrors?.intensity}
@@ -184,7 +185,7 @@ function ExerciseBlock({ block, number, errors, storedRecords, onChange, onRemov
                 />
               </div>
               <div className="workout-field workout-rounding">
-                <label htmlFor={`${setId}-rounding`}>Arrondi de la charge</label>
+                <label htmlFor={`${setId}-rounding`}>Ajustement de la charge</label>
                 <select
                   id={`${setId}-rounding`}
                   value={set.rounding.mode === 'exact' ? 'exact' : `${set.rounding.mode}-${set.rounding.increment}`}
@@ -208,13 +209,13 @@ function ExerciseBlock({ block, number, errors, storedRecords, onChange, onRemov
               <div className="workout-set-result">
                 <div className="workout-load" role="status" aria-live="polite" aria-atomic="true">
                   <span className="workout-label">
-                    {set.rounding.mode === 'exact' ? 'Charge exacte (kg)' : 'Charge sélectionnée (kg)'}
+                    Charge prévue
                   </span>
                   {load.status === 'ready' ? (
                     <>
                       <strong>{load.selectedKg.toString().replace('.', ',')} <span>kg</span></strong>
                       {load.selectedKg !== load.exactKg && (
-                        <span className="record-hint">Charge exacte : {load.exactKg.toString().replace('.', ',')} kg</span>
+                        <span className="record-hint">Charge exacte calculée : {load.exactKg.toString().replace('.', ',')} kg</span>
                       )}
                     </>
                   ) : (
@@ -304,6 +305,7 @@ function WorkoutEditor({ draft, storedRecords, onChange, onOpenRecords, showErro
         </div>
       </section>
 
+      <p className="record-hint">La charge est calculée automatiquement à partir du 1RM et de l’intensité choisie.</p>
       <div className="workout-exercise-list">
         {draft.exercises.map((block, index) => (
           <ExerciseBlock

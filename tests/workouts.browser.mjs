@@ -124,7 +124,7 @@ async function viewport(width, name, screenshot = false) {
   if (size.textarea) assert.ok(parseFloat(size.textarea) >= 16)
   if (width >= 960) {
     const centered = await evaluate(`(() => {
-      const panel = document.querySelector('.workout-sessions').getBoundingClientRect();
+      const panel = [...document.querySelectorAll('.workout-sessions')].find(item => item.getClientRects().length).getBoundingClientRect();
       const main = document.querySelector('main').getBoundingClientRect();
       return panel.width <= 680 && Math.abs((panel.left + panel.right) - (main.left + main.right)) <= 2
     })()`)
@@ -643,6 +643,9 @@ try {
     await call((source) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), j6Source)
     await reload()
     await click('Ouvrir', '.workout-session-list')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-set-summary").length'), 5)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-set-summary .workout-status")].every(status => status.textContent === "À réaliser")'), true)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-set-summary .workout-comparison-group:last-child")].every(group => group.textContent === "SOULEVÉAucun résultat enregistré")'), true)
     await click('Démarrer le suivi')
     assert.equal(await guardActive(), false)
     assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
@@ -780,6 +783,44 @@ try {
     assert.equal(await guardActive(), false)
   })
 
+  await check('fiche commune : prévu, effectué, saisie non confirmée et absence de résultat sans écriture', async () => {
+    await click('Annuler l’état réalisé', executionScope(1))
+    const before = await storedWorkouts()
+    const raw = await evaluate('localStorage.getItem("liftboard.workouts.v1")')
+    await click('← Retour à la séance')
+    const rows = await call(() => [...document.querySelectorAll('.workout-sessions:not(.workout-history) .workout-set-summary')].map(card => ({
+      title: card.querySelector("h3").textContent,
+      status: card.querySelector(".workout-status").textContent,
+      badges: card.querySelectorAll(".workout-status").length,
+      planned: card.querySelector(".workout-comparison-group:first-child").textContent,
+      lifted: card.querySelector(".workout-comparison-group:last-child").textContent,
+    })))
+    assert.equal(rows.length, 5)
+    assert.deepEqual(rows.map(row => row.title), ['Série 1', 'Série 2', 'Série 3', 'Série 1', 'Série 2'])
+    assert.equal(rows.every(row => row.badges === 1), true)
+    assert.equal(rows[0].status, 'Effectuée')
+    assert.match(rows[0].planned, /PRÉVU80 kg3 répétitions80 % du 1RM/)
+    assert.match(rows[0].lifted, /SOULEVÉ80 kg3 répétitions/)
+    assert.equal(rows[1].status, 'À réaliser')
+    assert.match(rows[1].lifted, /SOULEVÉ75 kg1 répétition.*Saisie conservée, non confirmée/s)
+    assert.equal(rows[4].status, 'À réaliser')
+    assert.equal(rows[4].lifted, 'SOULEVÉAucun résultat enregistré')
+    assert.doesNotMatch(rows[4].lifted, /0 kg|0 répétition|Non effectuée/)
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".workout-sessions:not(.workout-history) .workout-note-text")].map(p => p.textContent)'),
+      Object.values(before[0].notes).map(note => note || 'Aucune note'))
+    await evaluate('window.scrollTo(0, 0)')
+    for (const width of [320, 393, 430, 1440]) {
+      await viewport(width, 'planned-detail', width === 320 || width === 393 || width === 1440)
+      assert.equal(await evaluate('[...document.querySelectorAll(".workout-set-summary")].every(card => parseFloat(getComputedStyle(card).borderTopWidth) >= 1 && card.querySelectorAll(".workout-comparison-group").length === 2)'), true)
+      assert.equal(await evaluate('getComputedStyle(document.querySelector(".workout-set-comparison")).gridTemplateColumns.split(" ").length'), width === 320 ? 1 : 2)
+    }
+    assert.equal(await evaluate('localStorage.getItem("liftboard.workouts.v1")'), raw)
+    await click('Reprendre le suivi')
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(1, 'loadKg')), '75')
+    await click('Série réalisée', executionScope(1))
+  })
+
   await check('J6 : charge prévue absente et progression complète sans clôture', async () => {
     await click('Série réalisée', executionScope(4))
     assert.equal(await executionAt(4), undefined)
@@ -891,7 +932,7 @@ try {
     await call(source => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), fixesSource)
     await reload()
     await click('Ouvrir', '.workout-session-list')
-    assert.match(await evaluate('document.querySelector(".workout-detail-sets li").textContent'), /Série 1.*3 répétitions · 80 %.*Charge prévue.*80 kg/)
+    assert.match(await evaluate('document.querySelector(".workout-detail-sets li").textContent'), /Série 1.*À réaliser.*PRÉVU.*80 kg.*3 répétitions.*80 % du 1RM.*SOULEVÉ.*Aucun résultat enregistré/s)
     assert.equal(await evaluate('getComputedStyle(document.querySelector(".workout-detail-sets")).listStyleType'), 'none')
     await click('Démarrer le suivi')
     await click('Série réalisée', executionScope(0))
@@ -1069,6 +1110,559 @@ try {
     } finally {
       await command('Page.removeScriptToEvaluateOnNewDocument', { identifier })
     }
+  })
+
+  const historyScope = '.workout-history'
+  const historyCards = () => evaluate('[...document.querySelectorAll(".workout-history .workout-session-list h2")].map(item => item.textContent)')
+  const historySource = {
+    ...structuredClone(j6Source), id: 'history-workout', title: 'Historique J6-B',
+    notes: { before: 'Consigne initiale', during: 'Observation réelle', after: '' },
+  }
+
+  await check('J6-B : aucune confirmation refuse la clôture, puis saisie invalide protégée', async () => {
+    // Retirer de ce document le faux sessionStorage inaccessible du parcours précédent.
+    await reload()
+    await call(source => {
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source]))
+      sessionStorage.setItem('liftboard.navigation.v1', JSON.stringify({ section: 'sessions', trackingWorkoutId: null }))
+    }, historySource)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Démarrer le suivi')
+    await click('Terminer la séance')
+    assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"]').textContent), /Aucune performance confirmée/)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    await click('Série réalisée', executionScope(0))
+    await enter(executionField(0, 'loadKg'), '77,')
+    const before = await storedWorkouts()
+    await click('Terminer la séance')
+    assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"]').textContent), /ne sont pas enregistrées/)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,')
+    await click('Rétablir les valeurs enregistrées', executionScope(0))
+  })
+
+  await check('J6-B : avertissement 3/5, dialogue clavier et annulation sans conséquence', async () => {
+    await enter(executionField(1, 'reps'), '2')
+    await enter(executionField(1, 'loadKg'), '77,5')
+    await click('Série réalisée', executionScope(1))
+    await click('Série réalisée', executionScope(2))
+    // La quatrième série a une saisie persistée mais jamais confirmée.
+    await enter(executionField(3, 'reps'), '1')
+    const before = await storedWorkouts()
+    await call(() => [...document.querySelectorAll('button')].find(button => button.textContent === 'Terminer la séance').focus())
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /3 séries sur 5.*Les 2 autres séries seront considérées comme non effectuées.*saisies non confirmées sont conservées/s)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await settle()
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Terminer la séance')
+  })
+
+  await check('J6-B : quota et écriture refusée ne donnent aucun faux succès, puis nouvelle tentative', async () => {
+    const before = await storedWorkouts()
+    await click('Terminer la séance')
+    await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new DOMException('Full', 'QuotaExceededError')
+      return window.originalSetItem.call(this, key, value)
+    }`)
+    await click('Terminer la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /plein/)
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
+    await evaluate(`Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new Error('Denied')
+      return window.originalSetItem.call(this, key, value)
+    }`)
+    await click('Terminer la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Impossible d’écrire/)
+    assert.deepEqual(await storedWorkouts(), before)
+    await evaluate('Storage.prototype.setItem = window.originalSetItem')
+    await click('Terminer la séance', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    assert.deepEqual(await storedWorkouts(), [{ ...before[0], status: 'completed' }])
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Historique J6-B')
+    assert.equal(await evaluate('document.querySelector(".workout-notice").textContent'), 'Séance terminée et enregistrée dans l’historique.')
+    await click('← Retour à l’historique', historyScope)
+    assert.deepEqual(await historyCards(), ['Historique J6-B'])
+    assert.match(await evaluate('document.querySelector(".workout-history .workout-session-list").textContent'), /3 séries réalisées sur 5/)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
+    assert.deepEqual(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1"))'), { section: 'history', trackingWorkoutId: null })
+  })
+
+  await check('J6-B : F5 conserve Historique, retour volontaire aux Séances sans ancien suivi', async () => {
+    const before = await storedWorkouts()
+    await reload()
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    assert.deepEqual(await historyCards(), ['Historique J6-B'])
+    await click('Séances', '.primary-nav')
+    assert.match(await evaluate('document.querySelector(".workout-sessions:not(.workout-history)").textContent'), /Aucune séance planifiée/)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
+    await reload()
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+    assert.deepEqual(await storedWorkouts(), before)
+    await click('Historique', '.primary-nav')
+  })
+
+  await check('J6-B : consultation du prévu, réalisé, non confirmé, non réalisé et notes', async () => {
+    await click('Consulter la séance', historyScope)
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Historique J6-B')
+    const rows = await evaluate('[...document.querySelectorAll(".workout-history .workout-detail-sets li")].map(item => item.textContent)')
+    assert.match(rows[1], /Effectuée.*PRÉVU.*80 kg.*3 répétitions.*80 % du 1RM.*SOULEVÉ.*77,5 kg.*2 répétitions/s)
+    assert.match(rows[3], /Non confirmée.*SOULEVÉ.*Non renseignée.*1 répétition.*Saisie conservée, non confirmée/s)
+    assert.match(rows[4], /Non effectuée.*SOULEVÉ.*Non effectuée/s)
+    assert.doesNotMatch(rows[4], /0 kg/)
+    const notes = await evaluate('document.querySelector(".workout-history [aria-labelledby=detail-notes-title]").textContent')
+    assert.match(notes, /Avant.*Consigne initiale.*Pendant.*Observation réelle.*Après.*Aucune note/s)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-history input, .workout-history textarea").length'), 0)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-history button")].some(item => /suivi|Modifier|Supprimer/.test(item.textContent))'), false)
+    for (const width of [320, 393, 430, 768, 960, 1440]) {
+      await viewport(width, 'history-detail', width === 320 || width === 393 || width === 1440)
+      assert.equal(await evaluate(`[...document.querySelectorAll('.workout-history .workout-set-summary')].every(card => {
+        const style = getComputedStyle(card)
+        return parseFloat(style.borderTopWidth) >= 1 && parseFloat(style.paddingTop) >= 12 &&
+          style.backgroundColor !== getComputedStyle(card.closest('.workout-exercise')).backgroundColor &&
+          card.querySelectorAll('h3').length === 1 && card.querySelectorAll('.workout-comparison-group').length === 2 &&
+          [...card.querySelectorAll('.workout-comparison-load')].every(load => parseFloat(getComputedStyle(load).fontSize) >= 24)
+      })`), true)
+      const columns = await evaluate(`getComputedStyle(document.querySelector('.workout-set-comparison')).gridTemplateColumns.split(' ').length`)
+      assert.equal(columns, width === 320 ? 1 : 2)
+    }
+  })
+
+  await check('J6-B : note Après autosauvegardée, conservée après F5 et résultats intacts', async () => {
+    const before = (await storedWorkouts())[0]
+    await click('Notes', historyScope)
+    assert.equal(await evaluate('document.querySelector(".workout-history [aria-pressed=true]").textContent'), 'Après')
+    await enter('.workout-history textarea', 'Bilan après clôture\nÀ conserver')
+    await click('← Retour à la séance', historyScope)
+    assert.deepEqual((await storedWorkouts())[0], { ...before, notes: { ...before.notes, after: 'Bilan après clôture\nÀ conserver' } })
+    await reload()
+    await click('Consulter la séance', historyScope)
+    assert.match(await evaluate('document.querySelector(".workout-history .workout-note-text:last-child").parentElement.parentElement.textContent'), /Bilan après clôture/)
+  })
+
+  await check('J6-B : note en échec conservée entre onglets et fermeture protégée', async () => {
+    await click('Notes', historyScope)
+    const before = await storedWorkouts()
+    await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new Error('Denied')
+      return window.originalSetItem.call(this, key, value)
+    }`)
+    await enter('.workout-history textarea', 'Bilan non enregistré')
+    assert.equal(await guardActive(), true)
+    await click('Séances', '.primary-nav')
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector(".workout-history textarea").value'), 'Bilan non enregistré')
+    await click('← Retour à la séance', historyScope)
+    await click('Annuler', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), before)
+    await evaluate('Storage.prototype.setItem = window.originalSetItem')
+    await click('Réessayer', historyScope)
+    assert.equal(await guardActive(), false)
+    await click('← Retour à la séance', historyScope)
+  })
+
+  await check('J6-B : conflit de notes historiques conservé sans écraser la version récente', async () => {
+    await click('Notes', historyScope)
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].notes.after = 'Version récente ailleurs'
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    await enter('.workout-history textarea', 'Ancien formulaire')
+    assert.match(await evaluate('document.querySelector(".workout-history .workout-notes-error").textContent'), /note a changé ailleurs/)
+    assert.equal((await storedWorkouts())[0].notes.after, 'Version récente ailleurs')
+    await click('← Retour à la séance', historyScope)
+    await click('Abandonner la saisie', 'dialog[open]')
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('J6-B : réouverture annulée puis confirmée, sans perte et avec suivi accessible', async () => {
+    const before = (await storedWorkouts())[0]
+    await click('Réouvrir la séance', historyScope)
+    await click('Annuler', 'dialog[open]')
+    assert.deepEqual((await storedWorkouts())[0], before)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
+    await click('Réouvrir la séance', historyScope)
+    await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new DOMException('Full', 'QuotaExceededError')
+      return window.originalSetItem.call(this, key, value)
+    }`)
+    await click('Réouvrir la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /plein/)
+    assert.deepEqual((await storedWorkouts())[0], before)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
+    await evaluate('Storage.prototype.setItem = window.originalSetItem')
+    await click('Réouvrir la séance', 'dialog[open]')
+    assert.deepEqual((await storedWorkouts())[0], { ...before, status: 'planned' })
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), before.title)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
+    await click('Historique', '.primary-nav')
+    assert.deepEqual(await historyCards(), [])
+    await click('Retour aux séances', historyScope)
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), before.title)
+    await click('Reprendre le suivi')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(1, 'loadKg')), '77,5')
+    await enter(executionField(1, 'loadKg'), '75')
+    await click('Enregistrer la correction', executionScope(1))
+    assert.equal((await executionAt(1)).loadKg, 75)
+  })
+
+  await check('J6-B : clôture obsolète et séance supprimée ne sont jamais réécrites', async () => {
+    await click('Terminer la séance')
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].exercises[0].sets[0].execution.loadKg = 90
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    const before = await storedWorkouts()
+    await click('Terminer la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /performances.*changé/s)
+    assert.deepEqual(await storedWorkouts(), before)
+    await evaluate('localStorage.setItem("liftboard.workouts.v1", "[]")')
+    await click('Terminer la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /n’existe plus/)
+    assert.deepEqual(await storedWorkouts(), [])
+    await click('Annuler', 'dialog[open]')
+    await reload()
+  })
+
+  await check('J6-B : ancien zéro bloque la clôture avec série identifiée, puis correction et clôture complète', async () => {
+    const legacy = structuredClone(historySource)
+    legacy.exercises = [legacy.exercises[0]]
+    legacy.exercises[0].sets = legacy.exercises[0].sets.slice(0, 3)
+    legacy.exercises[0].sets.forEach(set => { set.execution = { completed: true, reps: 3, loadKg: 80 } })
+    legacy.exercises[0].sets[1].execution = { completed: true, reps: 0, loadKg: 0 }
+    await call(source => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), legacy)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Reprendre le suivi')
+    await click('Terminer la séance')
+    assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"]').textContent), /Exercice 1 \(Snatch\), série 2/)
+    assert.deepEqual(await storedWorkouts(), [legacy])
+    await enter(executionField(1, 'reps'), '2')
+    await enter(executionField(1, 'loadKg'), '77,5')
+    await click('Enregistrer la correction', executionScope(1))
+    await click('Terminer la séance')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Vous avez réalisé les 3 séries de cette séance/)
+    assert.doesNotMatch(await evaluate('document.querySelector("dialog[open]").textContent'), /restantes/)
+    await click('Terminer la séance', 'dialog[open]')
+    assert.equal((await storedWorkouts())[0].status, 'completed')
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), legacy.title)
+    await click('← Retour à l’historique', historyScope)
+  })
+
+  await check('J6-B : listes exclusives, tri décroissant stable et filtres exercice ET date', async () => {
+    const a = (await storedWorkouts())[0]
+    const b = { ...structuredClone(a), id: 'history-b', title: 'Front squat', date: '2026-10-25' }
+    b.exercises[0].exerciseId = 'front-squat'
+    const c = { ...structuredClone(a), id: 'history-c', title: 'Snatch même date', date: '2026-10-25' }
+    const planned = { ...structuredClone(a), id: 'planned-only', title: 'Seulement planifiée', status: 'planned' }
+    await call(workouts => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts)), [b, c, a, planned])
+    await click('Séances', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector(".workout-sessions:not(.workout-history) .workout-session-list h2").textContent'), planned.title)
+    await click('Historique', '.primary-nav')
+    assert.deepEqual(await historyCards(), [a.title, b.title, c.title])
+    for (const width of [320, 393, 430, 768, 960, 1440]) {
+      await viewport(width, 'history-list', width === 393 || width === 1440)
+      assert.equal(await evaluate('[...document.querySelectorAll(".workout-history input, .workout-history select")].every(field => field.labels.length === 1 && parseFloat(getComputedStyle(field).fontSize) >= 16)'), true)
+    }
+    await select('#history-exercise', 'snatch')
+    assert.deepEqual(await historyCards(), [a.title, c.title])
+    await enter('#history-date', '2026-10-25')
+    assert.deepEqual(await historyCards(), [c.title])
+    await click('Consulter la séance', historyScope)
+    await click('← Retour à l’historique', historyScope)
+    await click('Records', '.primary-nav')
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector("#history-date").value'), '2026-10-25')
+    assert.deepEqual(await historyCards(), [c.title])
+    await click('Réinitialiser les filtres', historyScope)
+    await enter('#history-date', '2026-10-25')
+    assert.deepEqual(await historyCards(), [b.title, c.title])
+    await select('#history-exercise', 'back-squat')
+    assert.match(await evaluate('document.querySelector(".workout-history .empty-state").textContent'), /Aucune séance ne correspond à ces filtres/)
+    await click('Effacer les filtres', historyScope)
+    assert.deepEqual(await historyCards(), [a.title, b.title, c.title])
+  })
+
+  await check('J6-B : ancienne réalisation terminée invalide reste visible sans transformation', async () => {
+    const legacy = { ...structuredClone(historySource), status: 'completed' }
+    legacy.exercises[0].sets[0].execution = { completed: true, reps: 0, loadKg: 0 }
+    await call(source => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), legacy)
+    await reload()
+    await click('Consulter la séance', historyScope)
+    const row = await evaluate('document.querySelector(".workout-history .workout-detail-sets li").textContent')
+    assert.match(row, /À corriger.*SOULEVÉ.*0 kg.*0 répétition.*Ancien résultat à corriger/s)
+    assert.deepEqual(await storedWorkouts(), [legacy])
+    await click('← Retour à l’historique', historyScope)
+  })
+
+  await check('J6-B : statut changé ailleurs bloque immédiatement un ancien suivi après notification', async () => {
+    await call(source => {
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source]))
+      sessionStorage.setItem('liftboard.navigation.v1', JSON.stringify({ section: 'sessions', trackingWorkoutId: source.id }))
+    }, historySource)
+    await reload()
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].status = 'completed'
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+      window.dispatchEvent(new StorageEvent('storage', { key: 'liftboard.workouts.v1' }))
+    })
+    await settle()
+    assert.match(await evaluate('document.querySelector("#workout-page-title").textContent'), /indisponible/)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-execution-set input")].some(input => input.getClientRects().length && !input.matches(":disabled"))'), false)
+    assert.equal(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1")).trackingWorkoutId'), null)
+    await reload()
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
+  })
+
+  await check('UX : référence 1RM unique, libellés explicites, arrondis et record absent', async () => {
+    await call(() => {
+      localStorage.setItem('liftboard.workouts.v1', '[]')
+      localStorage.setItem('liftboard.personal-records.v1', JSON.stringify([{ exerciseId: 'snatch', oneRepMaxKg: 100 }]))
+      sessionStorage.setItem('liftboard.navigation.v1', JSON.stringify({ section: 'sessions', trackingWorkoutId: null }))
+    })
+    await reload()
+    await click('+ Nouvelle séance')
+    await enter('#workout-title', 'UX création')
+    await click('+ Ajouter un exercice')
+    await enter('.workout-exercise input[id$="-reps"]', '2')
+    await enter('.workout-exercise input[id$="-intensity"]', '83,3')
+    await select('.workout-exercise select[id$="-rounding"]', 'down-2.5')
+    for (let index = 0; index < 4; index++) await click('+ Ajouter une série')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-record-context strong").length'), 1)
+    assert.equal(await evaluate('document.querySelector(".workout-record-context").textContent.trim()'), 'Record actuel (1RM) : 100 kg')
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Intensité (% du 1RM)").length'), 5)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Ajustement de la charge").length'), 5)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-set .workout-load")].every(load => /Charge prévue.*82,5 kg.*Charge exacte calculée : 83,3 kg/.test(load.textContent))'), true)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-editor > .record-hint")].filter(p => p.textContent === "La charge est calculée automatiquement à partir du 1RM et de l’intensité choisie.").length'), 1)
+    assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select").options].map(option => option.textContent)'), [
+      'Sans arrondi', 'Vers le bas · 1 kg', 'Vers le haut · 1 kg',
+      'Vers le bas · 2,5 kg', 'Vers le haut · 2,5 kg',
+      'Vers le bas · 5 kg', 'Vers le haut · 5 kg',
+    ])
+    await select('.workout-field > select:not([id$="-rounding"])', 'front-squat')
+    assert.match(await evaluate('document.querySelector(".workout-record-context").textContent'), /Record à renseigner/)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-load > strong")].every(load => load.textContent === "—")'), true)
+    await select('.workout-field > select:not([id$="-rounding"])', 'snatch')
+    await viewport(320, 'ux-editor', true)
+    await click('Enregistrer la séance')
+    assert.equal((await storedWorkouts())[0].exercises[0].sets.length, 5)
+    assert.equal((await storedWorkouts())[0].exercises[0].sets[0].load.selectedKg, 82.5)
+  })
+
+  await check('UX : changement de 1RM sans référence trompeuse ni recalcul du suivi et de l’historique', async () => {
+    const before = (await storedWorkouts())[0]
+    await call(() => localStorage.setItem('liftboard.personal-records.v1', JSON.stringify([{ exerciseId: 'snatch', oneRepMaxKg: 110 }])))
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Modifier')
+    assert.match(await evaluate('document.querySelector(".workout-record-context").textContent'), /Record actuel \(1RM\) : 110 kg.*charges déjà enregistrées restent figées/s)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-load > strong")].every(load => load.textContent === "82,5 kg")'), true)
+    await click('Annuler')
+    await click('Démarrer le suivi')
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-execution-planned")].every(p => /83,3 % du 1RM.*82,5 kg/.test(p.textContent))'), true)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-record-context").length'), 0)
+    const form = await evaluate('document.querySelector(".workout-execution-set").id')
+    await click('Série réalisée', `#${form}`)
+    await click('Terminer la séance')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /1 série sur 5.*Les 4 autres séries/s)
+    await click('Terminer la séance', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-history .workout-comparison-planned")].every(load => load.textContent === "82,5 kg")'), true)
+    assert.equal(await evaluate('document.querySelector(".workout-history").textContent.includes("110 kg")'), false)
+    assert.deepEqual((await storedWorkouts())[0].exercises[0].sets.map(set => set.load), before.exercises[0].sets.map(set => set.load))
+  })
+
+  await check('UX : clôture à une série restante visible malgré filtres et note historique en attente', async () => {
+    const old = { ...structuredClone(historySource), id: 'ux-old', title: 'Ancienne séance', status: 'completed', date: '2026-10-25' }
+    old.exercises = [{ ...old.exercises[0], exerciseId: 'front-squat' }]
+    const planned = { ...structuredClone(historySource), id: 'ux-new', title: 'Séance à retrouver' }
+    planned.exercises = [planned.exercises[0]]
+    planned.exercises[0].sets[0].execution = { completed: true, reps: 2, loadKg: 77.5 }
+    planned.exercises[0].sets[1].execution = { completed: true, reps: 3, loadKg: 80 }
+    await call(workouts => {
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+      sessionStorage.setItem('liftboard.navigation.v1', JSON.stringify({ section: 'history', trackingWorkoutId: null }))
+    }, [old, planned])
+    await reload()
+    await select('#history-exercise', 'front-squat')
+    await enter('#history-date', old.date)
+    await click('Séances', '.primary-nav')
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector("#history-date").value'), old.date)
+    assert.equal(await evaluate('document.querySelector("#history-exercise").value'), 'front-squat')
+    await click('Consulter la séance', historyScope)
+    await click('Notes', historyScope)
+    await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new Error('Denied')
+      return window.originalSetItem.call(this, key, value)
+    }`)
+    await enter('.workout-history textarea', 'Note à préserver malgré la clôture')
+    await evaluate('Storage.prototype.setItem = window.originalSetItem')
+    await click('Séances', '.primary-nav')
+    await click('Ouvrir', '.workout-session-list')
+    await click('Reprendre le suivi')
+    await click('Terminer la séance')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /2 séries sur 3\. La dernière série sera considérée comme non effectuée/)
+    assert.doesNotMatch(await evaluate('document.querySelector("dialog[open]").textContent'), /Les 1 séries/)
+    const before = await storedWorkouts()
+    await click('Annuler', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
+    await click('Terminer la séance')
+    await click('Terminer la séance', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), planned.title)
+    assert.equal(await guardActive(), true)
+    assert.deepEqual(await storedWorkouts(), [old, { ...planned, status: 'completed' }])
+    await click('← Retour à l’historique', historyScope)
+    assert.deepEqual(await historyCards(), [planned.title, old.title])
+    assert.equal(await evaluate('document.querySelector("#history-exercise").value'), '')
+    assert.equal(await evaluate('document.querySelector("#history-date").value'), '')
+    await click('Reprendre les notes en attente', historyScope)
+    assert.equal(await evaluate('document.querySelector(".workout-history textarea").value'), 'Note à préserver malgré la clôture')
+    assert.equal(await evaluate('document.activeElement === document.querySelector(".workout-history textarea")'), true)
+    await click('← Retour à la séance', historyScope)
+    await click('Annuler', 'dialog[open]')
+    await click('Réessayer', historyScope)
+    await click('← Retour à la séance', historyScope)
+    assert.equal(await guardActive(), false)
+    assert.equal((await storedWorkouts())[0].notes.after, 'Note à préserver malgré la clôture')
+    assert.deepEqual((await storedWorkouts())[1].exercises, planned.exercises)
+    await click('← Retour à l’historique', historyScope)
+  })
+
+  await check('UX : bouton Consulter contrasté, clavier, six largeurs et reflow équivalent à 200 %', async () => {
+    for (const width of [320, 393, 430, 768, 960, 1440]) await viewport(width, 'ux-history-list', width === 393 || width === 1440)
+    const style = await evaluate(`(() => {
+      const button = document.querySelector('.workout-consult'), style = getComputedStyle(button)
+      button.focus({ preventScroll: true })
+      return { color: style.color, border: style.borderTopColor, background: style.backgroundColor }
+    })()`)
+    assert.deepEqual(style, { color: 'rgb(212, 164, 90)', border: 'rgb(212, 164, 90)', background: 'rgb(27, 31, 32)' })
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.classList.contains("workout-consult")'), true)
+    assert.equal(await evaluate('getComputedStyle(document.activeElement).outlineStyle'), 'solid')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Ancienne séance')
+    // 1440 × 844 pixels physiques avec une surface CSS divisée par deux : reflow à 200 %.
+    await command('Emulation.setDeviceMetricsOverride', { width: 720, height: 422, deviceScaleFactor: 2, mobile: false })
+    await settle()
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true)
+    await call(() => [...document.querySelectorAll('.workout-history button')].find(button => button.textContent === 'Réouvrir la séance').scrollIntoView({ block: 'end' }))
+    assert.equal(await evaluate(`(() => {
+      const button = [...document.querySelectorAll('.workout-history button')].find(b => b.textContent === 'Réouvrir la séance').getBoundingClientRect()
+      return button.top >= 0 && button.bottom <= document.querySelector('.primary-nav').getBoundingClientRect().top
+    })()`), true)
+    const screenshot = await command('Page.captureScreenshot', { format: 'png' })
+    await writeFile(join(artifactDirectory, 'ux-history-reflow-200.png'), Buffer.from(screenshot.data, 'base64'))
+    await viewport(393, 'ux-history-final', true)
+    await click('← Retour à l’historique', historyScope)
+  })
+
+  await check('réouverture ciblée : fiche directe par ID, retour liste, filtres conservés et F5 cohérent', async () => {
+    const before = await storedWorkouts()
+    const target = before.find(workout => workout.id === 'ux-new')
+    assert.equal(target.exercises[0].sets.filter(set => set.execution?.completed).length, 2)
+    assert.equal(target.exercises[0].sets.length, 3)
+    await select('#history-exercise', 'snatch')
+    await enter('#history-date', target.date)
+    await click('Consulter la séance', '[aria-labelledby="history-card-ux-new"]')
+    const historyValues = await evaluate('[...document.querySelectorAll(".workout-history .workout-set-summary")].slice(0, 2).map(card => card.querySelector(".workout-set-comparison").textContent)')
+    await click('Réouvrir la séance', historyScope)
+    await click('Réouvrir la séance', 'dialog[open]')
+    const after = before.map(workout => workout.id === target.id ? { ...workout, status: 'planned' } : workout)
+    assert.deepEqual(await storedWorkouts(), after)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), target.title)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".workout-sessions:not(.workout-history) .workout-set-summary .workout-status")].map(status => status.textContent)'), ['Effectuée', 'Effectuée', 'À réaliser'])
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".workout-sessions:not(.workout-history) .workout-set-summary")].slice(0, 2).map(card => card.querySelector(".workout-set-comparison").textContent)'), historyValues)
+    assert.match(await evaluate('document.querySelector(".workout-sessions:not(.workout-history)").textContent'), /Reprendre le suivi.*Notes/s)
+    assert.deepEqual(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1"))'), { section: 'sessions', trackingWorkoutId: null })
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector("#history-exercise").value'), 'snatch')
+    assert.equal(await evaluate('document.querySelector("#history-date").value'), target.date)
+    assert.deepEqual(await historyCards(), [])
+    await click('Séances', '.primary-nav')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), target.title)
+    await click('← Retour aux séances')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+    assert.equal(await evaluate('document.querySelector("[aria-labelledby=card-ux-new] h2").textContent'), target.title)
+    await click('Ouvrir', '[aria-labelledby="card-ux-new"]')
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), target.title)
+    await reload()
+    // Les fiches ne sont pas persistées : conserver le retour à la liste existant.
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
+    assert.deepEqual(await storedWorkouts(), after)
+    await click('Ouvrir', '[aria-labelledby="card-ux-new"]')
+    await click('Reprendre le suivi')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 3')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(1, 'loadKg')), '80')
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(2, 'loadKg')), '')
+    assert.equal((await storedWorkouts()).find(workout => workout.id === target.id).exercises[0].sets[2].execution, undefined)
+    await click('Retour aux séances')
+  })
+
+  await check('réouverture obsolète ou supprimée : aucune fiche de succès et aucune restauration', async () => {
+    await click('Historique', '.primary-nav')
+    await select('#history-exercise', '')
+    await enter('#history-date', '')
+    await click('Consulter la séance', '[aria-labelledby="history-card-ux-old"]')
+    await click('Réouvrir la séance', historyScope)
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts.find(workout => workout.id === 'ux-old').exercises[0].sets[0].execution = { completed: true, reps: 2, loadKg: 70 }
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    const before = await storedWorkouts()
+    await click('Réouvrir la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /performances.*changé/s)
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Ancienne séance')
+    await call(() => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(JSON.parse(localStorage.getItem('liftboard.workouts.v1')).filter(workout => workout.id !== 'ux-old'))))
+    const remaining = await storedWorkouts()
+    await click('Réouvrir la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /n’existe plus/)
+    assert.deepEqual(await storedWorkouts(), remaining)
+    assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
+    await click('Annuler', 'dialog[open]')
+    await click('← Retour à l’historique', historyScope)
+  })
+
+  await check('J6-B : stockage inaccessible et corrompu distincts de l’historique vide, sans écriture', async () => {
+    await click('Historique', '.primary-nav')
+    await evaluate(`window.originalGetItem = Storage.prototype.getItem; Storage.prototype.getItem = function(key) {
+      if (key === 'liftboard.workouts.v1') throw new Error('Denied')
+      return window.originalGetItem.call(this, key)
+    }`)
+    await click('Séances', '.primary-nav')
+    await click('Historique', '.primary-nav')
+    assert.match(await evaluate('document.querySelector(".workout-history .records-storage-error").textContent'), /Impossible de lire/)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-history .empty-state").length'), 0)
+    await evaluate('Storage.prototype.getItem = window.originalGetItem; localStorage.setItem("liftboard.workouts.v1", "{corrompu")')
+    await click('Réessayer la lecture', historyScope)
+    assert.match(await evaluate('document.querySelector(".workout-history .records-storage-error").textContent'), /illisibles/)
+    assert.equal(await evaluate('localStorage.getItem("liftboard.workouts.v1")'), '{corrompu')
+    await click('Séances', '.primary-nav')
   })
 
   await check('stockage corrompu : message, écritures bloquées et brouillon préservé', async () => {

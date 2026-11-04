@@ -4,29 +4,33 @@ import type { Workout, WorkoutNoteCategory, WorkoutNotes } from '../types/workou
 import WorkoutConfirmation from './WorkoutConfirmation'
 import WorkoutNotesFields from './WorkoutNotesFields'
 
-export default function WorkoutQuickNotes({ workout, onSaved, onPendingChange, onClose, returnLabel = 'Retour aux séances' }: {
+export default function WorkoutQuickNotes({ workout, onSaved, onPendingChange, onClose, returnLabel = 'Retour aux séances', headingId = 'workout-page-title' }: {
   workout: Workout
   onSaved: (result: Extract<WorkoutsResult, { ok: true }>) => void
   onPendingChange: (pending: boolean) => void
   onClose: () => void
   returnLabel?: string
+  headingId?: string
 }) {
   const [notes, setNotes] = useState<WorkoutNotes>(() => ({ ...workout.notes }))
   const [error, setError] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   const pending = useRef<Partial<WorkoutNotes>>({})
+  const savedNotes = useRef(workout.notes)
 
   // Synchrone : l'écriture est terminée avant que l'utilisateur puisse fermer.
   // Seules les catégories saisies et non encore sauvegardées sont fusionnées.
   function persist(patch: Partial<WorkoutNotes>) {
     pending.current = patch
-    const result = updateWorkoutNotes(workout.id, patch)
+    const result = updateWorkoutNotes(workout.id, patch, undefined, savedNotes.current)
     if (!result.ok) {
       setError(result.error)
       onPendingChange(true)
       return
     }
     pending.current = {}
+    savedNotes.current = result.workouts.find((item) => item.id === workout.id)!.notes
+    setNotes({ ...savedNotes.current })
     setError(null)
     onPendingChange(false)
     onSaved(result)
@@ -44,11 +48,11 @@ export default function WorkoutQuickNotes({ workout, onSaved, onPendingChange, o
         else onClose()
       }}><span aria-hidden="true">←</span> {returnLabel}</button>
       <div className="page-heading">
-        <h1 id="workout-page-title">Notes de séance</h1>
+        <h1 id={headingId}>Notes de séance</h1>
         <p>{workout.title}</p>
       </div>
       <section className="workout-details" aria-label="Notes rapides">
-        <WorkoutNotesFields notes={notes} onChange={changeNote} initialCategory="during" focusOnMount />
+        <WorkoutNotesFields notes={notes} onChange={changeNote} initialCategory={workout.status === 'completed' ? 'after' : 'during'} focusOnMount />
         {error ? (
           <div className="workout-notes-error">
             <p className="record-error" role="alert">Non enregistré. {error}</p>

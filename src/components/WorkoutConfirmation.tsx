@@ -7,9 +7,10 @@ type Props = {
   error?: string | null
   onCancel: () => void
   onConfirm: () => void
+  destructive?: boolean
 }
 
-export default function WorkoutConfirmation({ title, children, confirmLabel, error, onCancel, onConfirm }: Props) {
+export default function WorkoutConfirmation({ title, children, confirmLabel, error, onCancel, onConfirm, destructive = true }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   const cancel = useRef<HTMLButtonElement>(null)
   const id = useId()
@@ -32,8 +33,8 @@ export default function WorkoutConfirmation({ title, children, confirmLabel, err
       <div id={`${id}-description`} className="record-dialog-description">{children}</div>
       {error && <p className="record-error" role="alert">{error}</p>}
       <div className="record-dialog-actions">
-        <button ref={cancel} className="record-button record-button-primary" type="button" onClick={onCancel}>Annuler</button>
-        <button className="record-button record-button-confirm-delete" type="button" onClick={onConfirm}>{confirmLabel}</button>
+        <button ref={cancel} className={`record-button${destructive ? ' record-button-primary' : ''}`} type="button" onClick={onCancel}>Annuler</button>
+        <button className={`record-button ${destructive ? 'record-button-confirm-delete' : 'record-button-primary'}`} type="button" onClick={onConfirm}>{confirmLabel}</button>
       </div>
     </dialog>
   )

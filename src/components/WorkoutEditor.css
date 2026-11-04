@@ -235,14 +235,6 @@
   list-style: none;
 }
 
-.workout-detail-sets .workout-set-result {
-  margin-top: 0;
-}
-
-.workout-detail-sets .workout-load {
-  flex: 0 1 auto;
-}
-
 .workout-note-text {
   white-space: pre-wrap;
 }
@@ -344,6 +336,95 @@
   font-family: var(--lb-font-display);
   font-size: var(--lb-text-xl);
   font-weight: 600;
+}
+
+.workout-execution-content {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.record-button.workout-consult {
+  border-color: var(--lb-color-accent);
+  color: var(--lb-color-accent);
+  background: var(--lb-color-surface);
+}
+
+.record-button.workout-consult:hover,
+.record-button.workout-consult:active {
+  background: var(--lb-color-raised);
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+.workout-set-summary {
+  display: grid;
+  min-width: 0;
+  gap: var(--lb-space-3);
+  padding: var(--lb-space-3);
+  border: var(--lb-border-width) solid var(--lb-color-control-border);
+  border-radius: var(--lb-radius-md);
+  background: var(--lb-color-raised);
+}
+
+.workout-set-summary h3 {
+  font-size: var(--lb-text-base);
+  font-weight: 600;
+}
+
+.workout-set-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--lb-space-4);
+}
+
+.workout-comparison-group {
+  display: grid;
+  align-content: start;
+  gap: var(--lb-space-1);
+  min-width: 0;
+}
+
+.workout-comparison-group .workout-label {
+  margin-bottom: var(--lb-space-1);
+  color: var(--lb-color-text-muted);
+}
+
+.workout-comparison-load {
+  font-family: var(--lb-font-display);
+  font-size: var(--lb-text-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lb-leading-xl);
+}
+
+.workout-comparison-planned {
+  color: var(--lb-color-accent);
+}
+
+@media (min-width: 375px) {
+  .workout-set-comparison {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.workout-history-filters {
+  margin-bottom: var(--lb-space-4);
+}
+
+.workout-history > .record-hint {
+  margin-bottom: var(--lb-space-3);
+}
+
+.workout-notice {
+  margin-bottom: var(--lb-space-4);
+  color: var(--lb-color-success);
+}
+
+@media (min-width: 640px) {
+  .workout-history-filters .workout-details-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .workout-sessions progress {

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type SubmitEvent } from 'react'
 import type { RecordsLoadResult } from '../data/personalRecords'
-import { createWorkout, deleteWorkout, loadWorkouts, sortWorkouts, updateWorkout } from '../data/workouts'
+import { createWorkout, deleteWorkout, loadWorkouts, sortWorkouts, updateWorkout, type WorkoutsResult } from '../data/workouts'
 import { createWorkoutDraft, duplicateWorkoutDraft, validateWorkoutDraft, workoutToDraft } from '../lib/workoutDraft'
 import { hasWorkoutExecution } from '../lib/workoutExecution'
-import { findTrackedWorkout } from '../lib/navigation'
+import { formatWorkoutDate } from '../lib/workoutHistory'
 import type { Workout, WorkoutDraft } from '../types/workout'
 import SectionIcon from './SectionIcon'
 import WorkoutConfirmation from './WorkoutConfirmation'
@@ -13,26 +13,29 @@ import WorkoutExecution from './WorkoutExecution'
 import WorkoutQuickNotes from './WorkoutQuickNotes'
 import './WorkoutEditor.css'
 
+export type WorkoutSessionsScreen = {
+  selected: Workout | null
+  view: 'list' | 'editor' | 'detail' | 'notes' | 'tracking'
+}
+
 type WorkoutSessionsProps = {
   storedRecords: RecordsLoadResult
   onOpenRecords: () => void
-  initialTrackingWorkoutId: string | null
+  screen: WorkoutSessionsScreen
+  onScreenChange: (update: (current: WorkoutSessionsScreen) => WorkoutSessionsScreen) => void
   onTrackingChange: (id: string | null) => void
+  stored: WorkoutsResult
+  onStoredChange: (result: WorkoutsResult) => void
+  onCompleted: (result: Extract<WorkoutsResult, { ok: true }>, id: string) => void
 }
 
-function formatWorkoutDate(date: string): string {
-  const [year, month, day] = date.split('-')
-  return `${day}/${month}/${year}`
-}
-
-function WorkoutSessions({ storedRecords, onOpenRecords, initialTrackingWorkoutId, onTrackingChange }: WorkoutSessionsProps) {
-  const [stored, setStored] = useState(() => loadWorkouts())
+function WorkoutSessions({ storedRecords, onOpenRecords, screen, onScreenChange, onTrackingChange, stored, onStoredChange: setStored, onCompleted }: WorkoutSessionsProps) {
   const [draft, setDraft] = useState<WorkoutDraft | null>(null)
   const [original, setOriginal] = useState<Workout | null>(null)
   const [duplicateSource, setDuplicateSource] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Workout | null>(() =>
-    stored.ok ? findTrackedWorkout(stored.workouts, initialTrackingWorkoutId) : null)
-  const [view, setView] = useState<'list' | 'editor' | 'detail' | 'notes' | 'tracking'>(selected ? 'tracking' : 'list')
+  const { selected, view } = screen
+  const setSelected = (selected: Workout | null) => onScreenChange((current) => ({ ...current, selected }))
+  const setView = (view: WorkoutSessionsScreen['view']) => onScreenChange((current) => ({ ...current, view }))
   const [notesReturn, setNotesReturn] = useState<'list' | 'tracking'>('list')
   const [hasEdits, setHasEdits] = useState(false)
   const [pendingNotes, setPendingNotes] = useState(false)
@@ -46,7 +49,9 @@ function WorkoutSessions({ storedRecords, onOpenRecords, initialTrackingWorkoutI
   const heading = useRef<HTMLHeadingElement>(null)
   const editorForm = useRef<HTMLFormElement>(null)
   const focusOnViewChange = useRef(false)
-  const trackingId = (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) ? selected?.id ?? null : null
+  const editable = stored.ok && stored.workouts.some((item) => item.id === selected?.id && item.status === 'planned')
+  const unavailable = selected && !editable && (view === 'tracking' || view === 'detail')
+  const trackingId = editable && (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) ? selected?.id ?? null : null
 
   useEffect(() => { onTrackingChange(trackingId) }, [onTrackingChange, trackingId])
 
@@ -95,6 +100,7 @@ function WorkoutSessions({ storedRecords, onOpenRecords, initialTrackingWorkoutI
     setStored(current)
     const workout = current.workouts.find((item) => item.id === id)
     if (!workout) { setError('Cette séance n’existe plus. La liste a été actualisée.'); return }
+    if (workout.status !== 'planned') { setError('Cette séance est terminée. Consultez-la dans l’Historique.'); return }
     setSelected(workout)
     if (nextView === 'notes') setNotesReturn('list')
     changeView(nextView)
@@ -191,16 +197,27 @@ function WorkoutSessions({ storedRecords, onOpenRecords, initialTrackingWorkoutI
   return (
     <div className="workout-sessions">
       {selected && (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) && (
-        <div hidden={view !== 'tracking'}>
-          <WorkoutExecution key={selected.id} initialWorkout={selected} active={view === 'tracking'} onPendingChange={setPendingExecution}
+        <div hidden={view !== 'tracking' || !editable}>
+          <WorkoutExecution key={selected.id} initialWorkout={selected} active={view === 'tracking' && editable} editable={editable} onPendingChange={setPendingExecution}
             onSaved={(result) => {
               setStored(result)
               setSelected(result.workouts.find((item) => item.id === selected.id) ?? selected)
+            }} onCompleted={(result) => {
+              setPendingExecution(false)
+              setSelected(null)
+              changeView('list')
+              onCompleted(result, selected.id)
             }} onBack={() => leaveTracking('detail')} onList={() => leaveTracking('list')}
             onNotes={() => { setNotesReturn('tracking'); changeView('notes') }} />
         </div>
       )}
-      {view === 'tracking' ? null : view === 'editor' && draft ? (
+      {unavailable ? (
+        <>
+          <h1 id="workout-page-title">Séance indisponible pour le suivi</h1>
+          <p className="record-error" role="alert">{!stored.ok ? stored.error : 'Cette séance a été terminée ou supprimée ailleurs. Le suivi est bloqué. Consultez la liste actuelle ou l’Historique. Les saisies en cours restent en mémoire jusqu’à votre départ du suivi.'}</p>
+          <button className="record-button" type="button" onClick={() => leaveTracking('list')}>Retour aux séances</button>
+        </>
+      ) : view === 'tracking' ? null : view === 'editor' && draft ? (
         <>
           <button className="record-button workout-back" type="button" onClick={() => changeView('list')}>
             <span aria-hidden="true">←</span> Retour aux séances

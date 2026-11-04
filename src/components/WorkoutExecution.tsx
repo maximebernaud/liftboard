@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { exercises } from '../data/personalRecords'
-import { updateWorkoutSetExecution, type WorkoutsResult } from '../data/workouts'
+import { completeWorkout, updateWorkoutSetExecution, type WorkoutsResult } from '../data/workouts'
+import { workoutCompletionError, workoutCompletionMessage } from '../lib/workoutHistory'
 import {
   confirmSetExecution, executionInputs, executionNumberInput, getWorkoutProgress, hasPendingExecutionInputs,
   parseExecutionLoad, parseExecutionReps, partialSetExecution, requiresExecutionCorrection, type ExecutionInputs,
 } from '../lib/workoutExecution'
 import { handleNumericArrow } from '../lib/numericInput'
 import type { Workout, WorkoutSet, WorkoutSetExecution } from '../types/workout'
+import WorkoutConfirmation from './WorkoutConfirmation'
 
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 
@@ -81,7 +83,7 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
       </div>
       <div className="workout-execution-planned">
         <p className="workout-label">Prévu</p>
-        <p><strong>{set.reps} rép.</strong><span aria-hidden="true"> · </span><strong>{set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : '—'}</strong></p>
+        <p><strong>{set.reps} rép.</strong><span aria-hidden="true"> · </span>{executionNumberInput(set.intensityPct)} % du 1RM<span aria-hidden="true"> · </span><strong>{set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : '—'}</strong></p>
       </div>
       <fieldset className="workout-execution-fields">
         <legend>Réalisé</legend>
@@ -91,7 +93,7 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
             const fieldError = invalid[field] || showRequired ? confirmation.errors[field] : undefined
             return (
               <div className="workout-field" key={field}>
-                <label htmlFor={fieldId}>{field === 'reps' ? 'Répétitions' : 'Charge (kg)'}</label>
+                <label htmlFor={fieldId}>{field === 'reps' ? 'Répétitions effectuées' : 'Charge réellement soulevée (kg)'}</label>
                 <input id={fieldId} type="text" inputMode={field === 'reps' ? 'numeric' : 'decimal'}
                   autoComplete="off" spellCheck={false} value={inputs[field] ?? ''}
                   placeholder={inputs[field] === null ? executionNumberInput(field === 'reps' ? set.reps : set.load?.selectedKg) : undefined}
@@ -131,10 +133,12 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
   )
 }
 
-export default function WorkoutExecution({ initialWorkout, active, onSaved, onPendingChange, onBack, onList, onNotes }: {
+export default function WorkoutExecution({ initialWorkout, active, editable, onSaved, onCompleted, onPendingChange, onBack, onList, onNotes }: {
   initialWorkout: Workout
   active: boolean
+  editable: boolean
   onSaved: (result: SavedResult) => void
+  onCompleted: (result: SavedResult) => void
   onPendingChange: (pending: boolean) => void
   onBack: () => void
   onList: () => void
@@ -143,6 +147,8 @@ export default function WorkoutExecution({ initialWorkout, active, onSaved, onPe
   // Les notes ne doivent jamais remplacer la structure d'un suivi ouvert.
   // Seules nos écritures validées actualisent cette vue ; les conflits gardent la saisie.
   const [workout, setWorkout] = useState(initialWorkout)
+  const [completing, setCompleting] = useState(false)
+  const [completionError, setCompletionError] = useState<string | null>(null)
   const pendingSets = useRef(new Set<string>())
   const heading = useRef<HTMLHeadingElement>(null)
   const progress = getWorkoutProgress(workout)
@@ -162,7 +168,7 @@ export default function WorkoutExecution({ initialWorkout, active, onSaved, onPe
         <h1 id={active ? 'workout-page-title' : undefined} ref={heading} tabIndex={-1}>Suivi · {workout.title}</h1>
         <p><time dateTime={workout.date}>{day}/{month}/{year}</time> · Planifiée</p>
       </div>
-      <div className="workout-editor">
+      <fieldset className="workout-editor workout-execution-content" disabled={!editable}>
         <section className="workout-details" aria-label="Progression de la séance">
           <p className="workout-execution-progress">{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total}</p>
           <progress max={progress.total} value={progress.completed} aria-label={`${progress.completed} séries réalisées sur ${progress.total}`} />
@@ -179,8 +185,34 @@ export default function WorkoutExecution({ initialWorkout, active, onSaved, onPe
               }} onPendingChange={handlePendingChange} />)}
           </section>
         ))}
+        <section className="workout-details" aria-label="Clôture de la séance">
+          <p>Terminez la séance pour la retrouver dans l’Historique avec ses performances et ses notes.</p>
+          <button className="record-button record-button-primary" type="button" aria-haspopup="dialog" onClick={() => {
+            const error = pendingSets.current.size
+              ? 'Des performances ne sont pas enregistrées. Corrigez ou confirmez les saisies en cours avant de terminer la séance.'
+              : workoutCompletionError(workout)
+            setCompletionError(error)
+            if (!error) setCompleting(true)
+          }}>Terminer la séance</button>
+          {completionError && !completing && <p className="record-error" role="alert">{completionError}</p>}
+        </section>
         <button className="record-button" type="button" onClick={onList}>Retour aux séances</button>
-      </div>
+      </fieldset>
+      {completing && editable && <WorkoutConfirmation title="Terminer cette séance ?" confirmLabel="Terminer la séance" destructive={false}
+        error={completionError} onCancel={() => { setCompleting(false); setCompletionError(null) }} onConfirm={() => {
+          if (pendingSets.current.size) {
+            setCompletionError('Des performances ne sont pas enregistrées. Annulez pour les corriger avant de terminer.')
+            return
+          }
+          const result = completeWorkout(workout)
+          if (!result.ok) { setCompletionError(result.error); return }
+          setCompleting(false)
+          onCompleted(result)
+        }}>
+        <p>{workoutCompletionMessage(workout)}</p>
+        {workout.exercises.some((block) => block.sets.some((set) => set.execution && !set.execution.completed)) &&
+          <p className="record-hint">Les saisies non confirmées sont conservées sans compter comme séries effectuées.</p>}
+      </WorkoutConfirmation>}
     </>
   )
 }

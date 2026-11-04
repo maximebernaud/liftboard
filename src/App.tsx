@@ -3,9 +3,12 @@ import Calculator from './components/Calculator'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
-import WorkoutSessions from './components/WorkoutSessions'
+import WorkoutSessions, { type WorkoutSessionsScreen } from './components/WorkoutSessions'
+import WorkoutHistory, { type HistoryView } from './components/WorkoutHistory'
 import { loadPersonalRecords, savePersonalRecords, type PersonalRecord } from './data/personalRecords'
-import { loadNavigation, saveNavigation, type SectionId } from './lib/navigation'
+import { loadWorkouts, workoutsStorageKey, type WorkoutsResult } from './data/workouts'
+import { findTrackedWorkout, loadNavigation, saveNavigation, type SectionId } from './lib/navigation'
+import { historyFiltersForWorkout, type HistoryFilters } from './lib/workoutHistory'
 import './App.css'
 
 const sections = [
@@ -15,28 +18,18 @@ const sections = [
   { id: 'history', label: 'Historique', title: 'Historique' },
 ] as const
 
-type EmptyStateProps = {
-  icon: SectionId
-  title: string
-  description?: string
-}
-
-function EmptyState({ icon, title, description }: EmptyStateProps) {
-  return (
-    <section className="empty-state" aria-labelledby="empty-state-title">
-      <span className="empty-state-icon">
-        <SectionIcon name={icon} />
-      </span>
-      <h2 id="empty-state-title">{title}</h2>
-      {description && <p>{description}</p>}
-    </section>
-  )
-}
-
 function App() {
   const [navigation, setNavigation] = useState(loadNavigation)
   const activeSection = navigation.section
   const [storedRecords, setStoredRecords] = useState(loadPersonalRecords)
+  const [storedWorkouts, setStoredWorkouts] = useState(loadWorkouts)
+  const [sessionsScreen, setSessionsScreen] = useState<WorkoutSessionsScreen>(() => {
+    const selected = storedWorkouts.ok ? findTrackedWorkout(storedWorkouts.workouts, navigation.trackingWorkoutId) : null
+    return { selected, view: selected ? 'tracking' : 'list' }
+  })
+  const [workoutNotice, setWorkoutNotice] = useState<string | null>(null)
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({ exerciseId: '', date: '' })
+  const [historyView, setHistoryView] = useState<HistoryView>({ workoutId: null, notes: false })
   const [returnToWorkout, setReturnToWorkout] = useState(false)
   const recordsNavButton = useRef<HTMLButtonElement>(null)
   const sessionsNavButton = useRef<HTMLButtonElement>(null)
@@ -44,12 +37,33 @@ function App() {
 
   useEffect(() => { saveNavigation(navigation) }, [navigation])
 
+  useEffect(() => {
+    function refreshWorkouts(event: StorageEvent) {
+      if (event.key === workoutsStorageKey || event.key === null) setStoredWorkouts(loadWorkouts())
+    }
+    window.addEventListener('storage', refreshWorkouts)
+    return () => window.removeEventListener('storage', refreshWorkouts)
+  }, [])
+
   const setTrackingWorkoutId = useCallback((id: string | null) => {
     setNavigation((current) => current.trackingWorkoutId === id ? current : { ...current, trackingWorkoutId: id })
   }, [])
 
   function setActiveSection(section: SectionId) {
+    if (section === 'sessions' || section === 'history') setStoredWorkouts(loadWorkouts())
+    setWorkoutNotice(null)
     setNavigation((current) => ({ ...current, section }))
+  }
+
+  function finishWorkout(result: Extract<WorkoutsResult, { ok: true }>, id: string) {
+    setStoredWorkouts(result)
+    const completed = result.workouts.find((workout) => workout.id === id)!
+    setHistoryFilters((current) => historyFiltersForWorkout(current, completed))
+    setHistoryView({ workoutId: id, notes: false })
+    setNavigation({ section: 'history', trackingWorkoutId: null })
+    setWorkoutNotice('Séance terminée et enregistrée dans l’historique.')
+    document.getElementById('main-content')?.focus({ preventScroll: true })
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }
 
   function persistRecords(nextRecords: PersonalRecord[]): string | null {
@@ -114,7 +128,7 @@ function App() {
       <main
         className="app-main container"
         id="main-content"
-        aria-labelledby={activeSection === 'sessions' ? 'workout-page-title' : 'page-title'}
+        aria-labelledby={activeSection === 'sessions' ? 'workout-page-title' : activeSection === 'history' ? 'history-page-title' : 'page-title'}
         tabIndex={-1}
       >
         {activeSection === 'records' && returnToWorkout && (
@@ -122,7 +136,7 @@ function App() {
             <span aria-hidden="true">←</span> Reprendre ma séance
           </button>
         )}
-        {activeSection !== 'sessions' && (
+        {activeSection !== 'sessions' && activeSection !== 'history' && (
           <div className={`page-heading${activeSection === 'records' ? ' page-heading-records' : ''}`}>
             <h1 id="page-title" aria-live="polite" aria-atomic="true">
               {currentSection.title}
@@ -138,7 +152,8 @@ function App() {
 
         <section hidden={activeSection !== 'sessions'} aria-label="Séances">
           <WorkoutSessions storedRecords={storedRecords} onOpenRecords={openWorkoutRecords}
-            initialTrackingWorkoutId={navigation.trackingWorkoutId} onTrackingChange={setTrackingWorkoutId} />
+            stored={storedWorkouts} onStoredChange={setStoredWorkouts} onCompleted={finishWorkout}
+            screen={sessionsScreen} onScreenChange={setSessionsScreen} onTrackingChange={setTrackingWorkoutId} />
         </section>
 
         {/* Garder les saisies en cours lorsque l'utilisateur change de section. */}
@@ -157,9 +172,19 @@ function App() {
           />
         </section>
 
-        {activeSection === 'history' && (
-          <EmptyState icon="history" title="Aucune séance terminée pour le moment" />
-        )}
+        <section hidden={activeSection !== 'history'} aria-label="Historique des séances">
+          {workoutNotice && activeSection === 'history' && <p className="workout-notice" role="status">{workoutNotice}</p>}
+          <WorkoutHistory stored={storedWorkouts} onStoredChange={setStoredWorkouts} onSessions={resumeWorkout}
+            filters={historyFilters} onFiltersChange={setHistoryFilters} view={historyView} onViewChange={setHistoryView}
+            onReopened={(result, id) => {
+              setStoredWorkouts(result)
+              setSessionsScreen({ selected: findTrackedWorkout(result.workouts, id), view: 'detail' })
+              setNavigation({ section: 'sessions', trackingWorkoutId: null })
+              setWorkoutNotice(null)
+              document.getElementById('main-content')?.focus({ preventScroll: true })
+              window.scrollTo({ top: 0, behavior: 'instant' })
+            }} />
+        </section>
       </main>
     </div>
   )

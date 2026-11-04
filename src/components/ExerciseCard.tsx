@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type SubmitEvent } from 'react'
 import { parseOneRepMax, type Exercise, type PersonalRecord } from '../data/personalRecords'
 import { handleNumericArrow } from '../lib/numericInput'
+import type { RecordEditDraft } from '../lib/recordDiscard'
 
 type ExerciseCardProps = {
   exercise: Exercise
   record?: PersonalRecord
+  storageUnavailable: boolean
   isEditing: boolean
   onStartEditing: () => void
   onStopEditing: () => void
-  onSave: (oneRepMaxKg: number) => string | null
-  onDelete: () => string | null
+  onDirtyChange: (draft: RecordEditDraft | null) => void
+  onSave: (oneRepMaxKg: number, original: PersonalRecord | null) => string | null
+  onDelete: (original: PersonalRecord) => string | null
 }
 
 function focusInput(input: HTMLInputElement | null) {
@@ -19,13 +22,17 @@ function focusInput(input: HTMLInputElement | null) {
 function ExerciseCard({
   exercise,
   record,
+  storageUnavailable,
   isEditing,
   onStartEditing,
   onStopEditing,
+  onDirtyChange,
   onSave,
   onDelete,
 }: ExerciseCardProps) {
   const [draft, setDraft] = useState('')
+  const [initialDraft, setInitialDraft] = useState('')
+  const [originalRecord, setOriginalRecord] = useState<PersonalRecord | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -48,6 +55,9 @@ function ExerciseCard({
 
   function startEditing() {
     setDraft(formattedRecord ?? '')
+    setInitialDraft(formattedRecord ?? '')
+    // Cette référence reste stable, même si les props changent après un événement storage.
+    setOriginalRecord(record ? { ...record } : null)
     setValidationError(null)
     setSaveError(null)
     onStartEditing()
@@ -72,7 +82,7 @@ function ExerciseCard({
     }
 
     setValidationError(null)
-    const error = onSave(oneRepMaxKg)
+    const error = onSave(oneRepMaxKg, originalRecord)
     if (error) {
       setSaveError(error)
       return
@@ -83,6 +93,7 @@ function ExerciseCard({
 
   function changeDraft(value: string) {
     setDraft(value)
+    onDirtyChange(value !== initialDraft ? { exerciseId: id, original: originalRecord, input: value } : null)
     setValidationError(null)
     setSaveError(null)
   }
@@ -94,9 +105,9 @@ function ExerciseCard({
   }
 
   function handleDelete() {
-    if (!deleteDialog.current?.open || !record) return
+    if (!deleteDialog.current?.open || !originalRecord) return
 
-    const error = onDelete()
+    const error = onDelete(originalRecord)
     if (error) {
       setDeleteError(error)
       return
@@ -113,7 +124,7 @@ function ExerciseCard({
       {!isEditing && (
         <>
           <p className="exercise-record" aria-live="polite" aria-atomic="true">
-            {record ? (
+            {storageUnavailable ? 'Records indisponibles' : record ? (
               <span className="record-value">{formattedRecord} <span>kg</span></span>
             ) : (
               <><span className="record-indicator" aria-hidden="true" />Record non renseigné</>
@@ -124,6 +135,7 @@ function ExerciseCard({
               ref={editButton}
               className="record-button"
               type="button"
+              disabled={storageUnavailable}
               aria-label={`${record ? 'Modifier le record' : 'Ajouter un record'} : ${name}`}
               onClick={startEditing}
             >
@@ -163,7 +175,7 @@ function ExerciseCard({
               Annuler
             </button>
           </div>
-          {record && (
+          {originalRecord && (
             <div className="record-delete-action">
               <button
                 ref={deleteButton}
@@ -191,7 +203,7 @@ function ExerciseCard({
       >
         <h3 id={`${inputId}-dialog-title`}>Effacer ce record ?</h3>
         <p id={`${inputId}-dialog-description`} className="record-dialog-description">
-          Le record <strong>{name} de {formattedRecord} kg</strong> sera définitivement supprimé.
+          Le record <strong>{name} de {originalRecord?.oneRepMaxKg.toString().replace('.', ',')} kg</strong> sera définitivement supprimé.
         </p>
         {deleteError && <p className="record-error" role="alert">{deleteError}</p>}
         <div className="record-dialog-actions">

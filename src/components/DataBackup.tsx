@@ -67,8 +67,8 @@ export default function DataBackup({ restoreBlocked, notice, onNoticeChange, onR
       <h2 id="data-backup-title">Sauvegarder mes entraînements</h2>
       <p className="record-hint">Télécharge une copie de tes records, séances et notes pour pouvoir les retrouver si tu changes d'appareil ou de navigateur chiby 🤞</p>
       <div className="data-backup-actions">
-        <button className="record-button" type="button" onClick={exportCurrent}>Récupérer mes données</button>
-        <button ref={restoreButton} className="record-button" type="button" disabled={reading} aria-haspopup="dialog" onClick={() => fileInput.current?.click()}>Restaurer une sauvegarde</button>
+        <button className="record-button" type="button" onClick={exportCurrent}>Télécharger ma sauvegarde</button>
+        <button ref={restoreButton} className="record-button" type="button" disabled={reading} aria-haspopup="dialog" onClick={() => fileInput.current?.click()}>Récupérer mes données</button>
       </div>
       <input ref={fileInput} type="file" accept=".json,application/json" aria-label="Fichier de sauvegarde LiftBoard" hidden onChange={(event) => {
         const file = event.currentTarget.files?.[0]

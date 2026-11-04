@@ -27,12 +27,12 @@ let acceptBeforeUnload = false
 let beforeUnloadPrompts = 0
 let fileChooserPrompts = 0
 
-function command(method, params = {}) {
+function command(method, params = {}, connection = socket) {
   return new Promise((resolve, reject) => {
     const id = ++nextId
     const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`Délai dépassé : ${method}`)) }, 10000)
     pending.set(id, { resolve, reject, timeout })
-    socket.send(JSON.stringify({ id, method, params }))
+    connection.send(JSON.stringify({ id, method, params }))
   })
 }
 
@@ -109,17 +109,57 @@ const storedWorkouts = () => evaluate('JSON.parse(localStorage.getItem("liftboar
 const guardActive = () => evaluate('!window.dispatchEvent(new Event("beforeunload", { cancelable: true }))')
 
 async function check(label, action) {
-  await action()
+  try { await action() } catch (error) {
+    console.error(`${passed} parcours réussis, 1 échoué ; arrêt sur : ${label}`)
+    throw error
+  }
   passed++
   console.log(`✓ ${label}`)
+}
+
+async function connectTarget(address) {
+  const connection = new WebSocket(address)
+  connection.addEventListener('message', (event) => {
+    const message = JSON.parse(event.data)
+    if (message.method === 'Page.fileChooserOpened') fileChooserPrompts++
+    if (message.method === 'Page.javascriptDialogOpening' && message.params.type === 'beforeunload' && acceptBeforeUnload) {
+      beforeUnloadPrompts++
+      void command('Page.handleJavaScriptDialog', { accept: true }, connection).catch(error => browserErrors.push(String(error)))
+    }
+    if (message.method === 'Runtime.exceptionThrown') browserErrors.push(message.params.exceptionDetails)
+    const request = pending.get(message.id)
+    if (!request) return
+    clearTimeout(request.timeout)
+    pending.delete(message.id)
+    if (message.error) request.reject(new Error(JSON.stringify(message.error)))
+    else request.resolve(message.result)
+  })
+  await new Promise((resolve, reject) => {
+    connection.addEventListener('open', resolve, { once: true })
+    connection.addEventListener('error', reject, { once: true })
+  })
+  return connection
+}
+
+async function inTab(connection, action) {
+  const previous = socket
+  socket = connection
+  try {
+    await command('Page.bringToFront')
+    return await action()
+  } finally {
+    socket = previous
+    await command('Page.bringToFront')
+    await settle()
+  }
 }
 
 async function chooseBackup(path) {
   const before = fileChooserPrompts
   // L'activation au clavier ou au pointeur place le focus sur le déclencheur.
   await call(() => [...document.querySelectorAll('.data-backup button')]
-    .find(button => button.textContent === 'Restaurer une sauvegarde').focus({ preventScroll: true }))
-  await click('Restaurer une sauvegarde', '.data-backup')
+    .find(button => button.textContent === 'Récupérer mes données').focus({ preventScroll: true }))
+  await click('Récupérer mes données', '.data-backup')
   assert.equal(fileChooserPrompts, before + 1, 'Le bouton ouvre le sélecteur natif')
   const { root } = await command('DOM.getDocument')
   const { nodeId } = await command('DOM.querySelector', { nodeId: root.nodeId, selector: '.data-backup input[type=file]' })
@@ -136,7 +176,7 @@ async function downloadCurrentBackup() {
   // Chrome peut remplacer un téléchargement de même nom : isoler chaque export.
   const downloadDirectory = await mkdtemp(join(artifactDirectory, 'download-'))
   await command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadDirectory })
-  await click('Exporter mes données', '.data-backup')
+  await click('Télécharger ma sauvegarde', '.data-backup')
   for (let attempt = 0; attempt < 80; attempt++) {
     const filename = (await readdir(downloadDirectory)).find(name => name.endsWith('.json'))
     if (filename) {
@@ -148,7 +188,7 @@ async function downloadCurrentBackup() {
   throw new Error('Aucun fichier JSON effectivement téléchargé')
 }
 
-async function viewport(width, name, screenshot = false) {
+async function viewport(width, name, screenshot = false, section = 'sessions') {
   await command('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 960 })
   await settle()
   const size = await evaluate(`({ width: innerWidth, document: document.documentElement.scrollWidth,
@@ -158,7 +198,7 @@ async function viewport(width, name, screenshot = false) {
   assert.ok(size.document <= width && size.width === width, `${name} à ${width}px : débordement ${JSON.stringify(size)}`)
   assert.ok(size.buttons.every((button) => button.width >= 44 && button.height >= 44), `Cibles tactiles : ${JSON.stringify(size.buttons)}`)
   if (size.textarea) assert.ok(parseFloat(size.textarea) >= 16)
-  if (width >= 960) {
+  if (width >= 960 && section === 'sessions') {
     const centered = await evaluate(`(() => {
       const panel = [...document.querySelectorAll('.workout-sessions')].find(item => item.getClientRects().length).getBoundingClientRect();
       const main = document.querySelector('main').getBoundingClientRect();
@@ -186,26 +226,7 @@ try {
   })
   const debugOrigin = new URL(address).origin.replace('ws:', 'http:')
   const target = await (await fetch(`${debugOrigin}/json/new?${encodeURIComponent(baseUrl)}`, { method: 'PUT' })).json()
-  socket = new WebSocket(target.webSocketDebuggerUrl)
-  socket.addEventListener('message', (event) => {
-    const message = JSON.parse(event.data)
-    if (message.method === 'Page.fileChooserOpened') fileChooserPrompts++
-    if (message.method === 'Page.javascriptDialogOpening' && message.params.type === 'beforeunload' && acceptBeforeUnload) {
-      beforeUnloadPrompts++
-      void command('Page.handleJavaScriptDialog', { accept: true }).catch(error => browserErrors.push(String(error)))
-    }
-    if (message.method === 'Runtime.exceptionThrown') browserErrors.push(message.params.exceptionDetails)
-    const request = pending.get(message.id)
-    if (!request) return
-    clearTimeout(request.timeout)
-    pending.delete(message.id)
-    if (message.error) request.reject(new Error(JSON.stringify(message.error)))
-    else request.resolve(message.result)
-  })
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true })
-    socket.addEventListener('error', reject, { once: true })
-  })
+  socket = await connectTarget(target.webSocketDebuggerUrl)
   await command('Page.enable')
   await command('Runtime.enable')
   await command('Page.setInterceptFileChooserDialog', { enabled: true })
@@ -262,7 +283,7 @@ try {
     await click('Annuler', 'dialog[open]')
     assert.deepEqual(await snapshotBusiness(), before)
     assert.equal(await evaluate('document.querySelector(".data-backup dialog")'), null)
-    assert.equal(await evaluate('document.activeElement.textContent'), 'Restaurer une sauvegarde')
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Récupérer mes données')
   })
 
   await check('J7 : fichiers JSON invalides, version incompatible et données corrompues refusés sans écriture', async () => {
@@ -384,6 +405,388 @@ try {
     await click('Restaurer mes données', 'dialog[open]')
     assert.deepEqual(await storedWorkouts(), [])
     assert.deepEqual(await evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1"))'), [])
+    await reload()
+  })
+
+  const snatchCard = '.exercise-grid > li:nth-child(1)'
+  const cleanCard = '.exercise-grid > li:nth-child(2)'
+  const storedRecords = () => evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1") ?? "[]")')
+  const seedRecords = async () => {
+    await evaluate('localStorage.setItem("liftboard.personal-records.v1", JSON.stringify([{exerciseId:"snatch",oneRepMaxKg:100},{exerciseId:"clean-and-jerk",oneRepMaxKg:120}]))')
+    await reload()
+    await click('Records', '.primary-nav')
+  }
+
+  await check('J8-B : Record inchangé sans avertissement, annulation du changement avec saisie intégralement conservée', async () => {
+    await seedRecords()
+    await click('Modifier le record', snatchCard)
+    assert.equal(await guardActive(), false)
+    await click('Modifier le record', cleanCard)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    await click('Modifier le record', snatchCard)
+    await enter('#record-snatch', '95,')
+    assert.equal(await guardActive(), true)
+    await click('Modifier le record', cleanCard)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer à modifier')
+    await click('Continuer à modifier', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '95,')
+    assert.equal(await guardActive(), true)
+    await click('Modifier le record', cleanCard)
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await settle()
+    assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '95,')
+    await enter('#record-snatch', '100')
+    assert.equal(await guardActive(), false, 'Revenir à la saisie initiale retire la protection')
+  })
+
+  await check('J8-B : abandon confirmé, valeur enregistrée restaurée et brouillon invalide jamais autosauvegardé', async () => {
+    await enter('#record-snatch', 'invalide')
+    await click('Enregistrer', snatchCard)
+    assert.equal(await evaluate('document.querySelector("#record-snatch").getAttribute("aria-invalid")'), 'true')
+    await click('Modifier le record', cleanCard)
+    await click('Abandonner les modifications', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '120')
+    assert.equal(await guardActive(), false)
+    await click('Modifier le record', snatchCard)
+    assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '100')
+    assert.equal((await storedRecords())[0].oneRepMaxKg, 100)
+  })
+
+  await check('J8-B : rechargement natif protégé, y compris depuis une section masquée', async () => {
+    await enter('#record-snatch', '95')
+    await click('Calculer', '.primary-nav')
+    assert.equal(await guardActive(), true)
+    const before = beforeUnloadPrompts
+    await reload(true)
+    assert.equal(beforeUnloadPrompts, before + 1, 'Chrome demande confirmation du rechargement')
+    assert.equal(await guardActive(), false)
+    await click('Records', '.primary-nav')
+    await click('Modifier le record', snatchCard)
+    assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '100')
+    await click('Annuler', snatchCard)
+    await click('Séances', '.primary-nav')
+  })
+
+  const discardParagraphs = () => evaluate('[...document.querySelectorAll("dialog[open] .record-dialog-description p")].map(p => p.textContent)')
+  await check('J8-C UX Records : message exact, boutons explicites, clavier, focus et annulation sans perte', async () => {
+    await click('Records', '.primary-nav')
+    await click('Modifier le record', snatchCard)
+    await enter('#record-snatch', '95')
+    const before = await storedRecords()
+    await call(scope => {
+      document.querySelector('#record-snatch').setSelectionRange(1, 2)
+      document.querySelector(`${scope} button`).focus({ preventScroll: true })
+    }, cleanCard)
+    await click('Modifier le record', cleanCard)
+    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Modifications non enregistrées')
+    assert.deepEqual(await discardParagraphs(), [
+      "Tu as modifié ton Record de Snatch de 100 kg à 95 kg, mais tu ne l'as pas enregistré.",
+      'Si tu ouvres Clean & Jerk, ta saisie de 95 kg sera perdue. La valeur actuellement enregistrée ne sera pas modifiée par cet abandon.',
+    ])
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("dialog[open] button")].map(b => b.textContent)'), ['Continuer à modifier', 'Abandonner les modifications'])
+    assert.equal(await evaluate(`(() => {
+      const dialog = document.querySelector('dialog[open]');
+      return document.getElementById(dialog.getAttribute('aria-labelledby')) === dialog.querySelector('h3') &&
+        document.getElementById(dialog.getAttribute('aria-describedby')) === dialog.querySelector('.record-dialog-description');
+    })()`), true)
+    for (const width of [320, 393, 430, 768, 1440]) {
+      await viewport(width, 'j8c-record-popup', width === 320 || width === 1440, 'records')
+      assert.equal(await evaluate(`(() => {
+        const dialog = document.querySelector('dialog[open]');
+        return dialog.scrollWidth === dialog.clientWidth && [...dialog.querySelectorAll('button')].every(button => {
+          const box = button.getBoundingClientRect();
+          return box.width >= 44 && box.height >= 44 && box.left >= 0 && box.right <= innerWidth;
+        });
+      })()`), true, 'Message et boutons lisibles sans débordement horizontal')
+    }
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Abandonner les modifications')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer à modifier')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '95')
+    assert.deepEqual(await evaluate('({start: document.querySelector("#record-snatch").selectionStart, end: document.querySelector("#record-snatch").selectionEnd})'), { start: 1, end: 2 })
+    assert.equal(await call(scope => document.activeElement === document.querySelector(`${scope} button`), cleanCard), true)
+    assert.deepEqual(await storedRecords(), before)
+    await click('Modifier le record', cleanCard)
+    await click('Abandonner les modifications', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '120')
+    assert.equal(await guardActive(), false)
+    assert.deepEqual(await storedRecords(), before)
+    await click('Annuler', cleanCard)
+  })
+
+  await check('J8-C UX Records : premier Record, décimales et destination dynamiques sans ancienne valeur inventée', async () => {
+    const frontCard = '.exercise-grid > li:nth-child(3)'
+    const backCard = '.exercise-grid > li:nth-child(4)'
+    const before = await storedRecords()
+    await click('Ajouter un record', frontCard)
+    await enter('#record-front-squat', '82.5')
+    await click('Ajouter un record', backCard)
+    assert.deepEqual(await discardParagraphs(), [
+      "Tu as saisi un Record de Front Squat à 82,5 kg, mais tu ne l'as pas enregistré.",
+      'Si tu ouvres Back Squat, ta saisie de 82,5 kg sera perdue. Les données actuellement enregistrées ne seront pas modifiées par cet abandon.',
+    ])
+    await click('Continuer à modifier', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#record-front-squat").value'), '82.5')
+    await enter('#record-front-squat', ' ')
+    await click('Ajouter un record', backCard)
+    assert.doesNotMatch((await discardParagraphs()).join(' '), /kg/)
+    await click('Continuer à modifier', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#record-front-squat").value'), ' ')
+    await enter('#record-front-squat', 'invalide')
+    await click('Ajouter un record', backCard)
+    assert.match((await discardParagraphs())[0], /« invalide ».*Front Squat.*n'était pas renseigné/)
+    assert.doesNotMatch((await discardParagraphs()).join(' '), /kg/)
+    await click('Continuer à modifier', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("#record-front-squat").value'), 'invalide')
+    await click('Annuler', frontCard)
+    assert.deepEqual(await storedRecords(), before)
+  })
+
+  await check('J8-C UX Records : champ vidé ou invalide cité sans faux poids, brouillon conservé', async () => {
+    const before = await storedRecords()
+    await click('Modifier le record', snatchCard)
+    for (const input of ['', 'invalide', '0', 'Infinity', '<b>95</b>']) {
+      await enter('#record-snatch', input)
+      await click('Modifier le record', cleanCard)
+      const [change, consequence] = await discardParagraphs()
+      assert.match(change, /Snatch.*initialement à 100 kg/)
+      if (input) assert.ok(change.includes(`« ${input} »`))
+      else assert.match(change, /vidé le champ/)
+      assert.equal(consequence, 'Si tu ouvres Clean & Jerk, ta saisie actuelle sera perdue. La valeur actuellement enregistrée ne sera pas modifiée par cet abandon.')
+      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open] b"))'), false, 'La saisie est du texte, jamais du HTML')
+      await click('Continuer à modifier', 'dialog[open]')
+      assert.equal(await evaluate('document.querySelector("#record-snatch").value'), input)
+      assert.equal(await guardActive(), true)
+      assert.deepEqual(await storedRecords(), before)
+    }
+    await click('Annuler', snatchCard)
+    await click('Séances', '.primary-nav')
+  })
+
+  const peerTarget = await (await fetch(`${debugOrigin}/json/new?${encodeURIComponent(baseUrl)}`, { method: 'PUT' })).json()
+  const peer = await connectTarget(peerTarget.webSocketDebuggerUrl)
+  await command('Page.enable', {}, peer)
+  await command('Runtime.enable', {}, peer)
+  await inTab(peer, waitForApp)
+  try {
+    await check('J8-C : deux vrais onglets, mouvements indépendants fusionnés et calculateur synchronisé', async () => {
+      await click('Records', '.primary-nav')
+      await click('Modifier le record', cleanCard)
+      await enter('#record-clean-and-jerk', '125')
+      await inTab(peer, async () => {
+        await click('Records', '.primary-nav')
+        await click('Modifier le record', snatchCard)
+        await enter('#record-snatch', '105')
+        await click('Enregistrer', snatchCard)
+      })
+      assert.match(await call(scope => document.querySelector(`${scope} .exercise-record`).textContent, snatchCard), /105/)
+      assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '125')
+      await click('Calculer', '.primary-nav')
+      assert.match(await evaluate('document.querySelector(".calculator-result-value").textContent'), /78,75/)
+      await click('Records', '.primary-nav')
+      await click('Enregistrer', cleanCard)
+      assert.deepEqual(await storedRecords(), [{ exerciseId: 'snatch', oneRepMaxKg: 105 }, { exerciseId: 'clean-and-jerk', oneRepMaxKg: 125 }])
+      assert.equal(await guardActive(), false)
+    })
+
+    await check('J8-C : conflit du même Record, référence stable après storage, brouillon et valeur récente préservés', async () => {
+      await click('Modifier le record', snatchCard)
+      await enter('#record-snatch', '110')
+      await inTab(peer, async () => {
+        await click('Modifier le record', snatchCard)
+        await enter('#record-snatch', '107,5')
+        await click('Enregistrer', snatchCard)
+      })
+      assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '110')
+      await click('Modifier le record', cleanCard)
+      assert.equal((await discardParagraphs())[0], "Tu as modifié ton Record de Snatch de 105 kg à 110 kg, mais tu ne l'as pas enregistré.")
+      await click('Continuer à modifier', 'dialog[open]')
+      assert.equal((await storedRecords())[0].oneRepMaxKg, 107.5)
+      await click('Enregistrer', snatchCard)
+      assert.match(await call(scope => document.querySelector(`${scope} [role=alert]`).textContent, snatchCard), /modifié ailleurs/)
+      assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '110')
+      assert.equal((await storedRecords())[0].oneRepMaxKg, 107.5)
+      assert.equal(await guardActive(), true)
+      await click('Annuler', snatchCard)
+      await click('Modifier le record', snatchCard)
+      assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '107,5')
+      await click('Annuler', snatchCard)
+    })
+
+    await check('J8-C : effacement concurrent refusé et effacement ciblé sans perte des autres mouvements', async () => {
+      await click('Modifier le record', snatchCard)
+      await inTab(peer, async () => {
+        await click('Modifier le record', snatchCard)
+        await enter('#record-snatch', '108')
+        await click('Enregistrer', snatchCard)
+      })
+      await click('Effacer ce record', snatchCard)
+      await click('Effacer le record', 'dialog[open]')
+      assert.match(await evaluate('document.querySelector("dialog[open] [role=alert]").textContent'), /modifié ailleurs/)
+      assert.equal((await storedRecords())[0].oneRepMaxKg, 108)
+      await click('Annuler', 'dialog[open]')
+      await click('Annuler', snatchCard)
+      await click('Modifier le record', snatchCard)
+      await click('Effacer ce record', snatchCard)
+      await click('Effacer le record', 'dialog[open]')
+      assert.deepEqual(await storedRecords(), [{ exerciseId: 'clean-and-jerk', oneRepMaxKg: 125 }])
+    })
+
+    await check('J8-C : existence modifiée ailleurs, création concurrente et suppression refusent les saisies obsolètes', async () => {
+      await click('Ajouter un record', snatchCard)
+      await enter('#record-snatch', '110')
+      await inTab(peer, async () => {
+        await click('Ajouter un record', snatchCard)
+        await enter('#record-snatch', '105')
+        await click('Enregistrer', snatchCard)
+      })
+      await click('Enregistrer', snatchCard)
+      assert.match(await call(scope => document.querySelector(`${scope} [role=alert]`).textContent, snatchCard), /modifié ailleurs/)
+      assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '110')
+      await click('Annuler', snatchCard)
+      await click('Modifier le record', snatchCard)
+      await enter('#record-snatch', '111')
+      await inTab(peer, async () => {
+        await click('Modifier le record', snatchCard)
+        await click('Effacer ce record', snatchCard)
+        await click('Effacer le record', 'dialog[open]')
+      })
+      await click('Enregistrer', snatchCard)
+      assert.match(await call(scope => document.querySelector(`${scope} [role=alert]`).textContent, snatchCard), /modifié ailleurs/)
+      assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '111')
+      assert.deepEqual(await storedRecords(), [{ exerciseId: 'clean-and-jerk', oneRepMaxKg: 125 }])
+      await click('Annuler', snatchCard)
+    })
+
+    await check('J8-C : corruption externe pendant une édition, écriture bloquée et brouillon conservé', async () => {
+      await click('Modifier le record', cleanCard)
+      await enter('#record-clean-and-jerk', '130')
+      await inTab(peer, () => evaluate('localStorage.setItem("liftboard.personal-records.v1", "{corrompu")'))
+      assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '130')
+      await click('Enregistrer', cleanCard)
+      assert.equal(await evaluate('localStorage.getItem("liftboard.personal-records.v1")'), '{corrompu')
+      assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '130')
+      assert.equal(await guardActive(), true)
+      await inTab(peer, () => evaluate('localStorage.setItem("liftboard.personal-records.v1", JSON.stringify([{exerciseId:"clean-and-jerk",oneRepMaxKg:125}]))'))
+      await click('Enregistrer', cleanCard)
+      assert.deepEqual(await storedRecords(), [{ exerciseId: 'clean-and-jerk', oneRepMaxKg: 130 }])
+    })
+  } finally {
+    // Fermer seulement le second onglet du profil créé par cette recette.
+    await fetch(`${debugOrigin}/json/close/${peerTarget.id}`)
+    peer.close()
+    await command('Page.bringToFront')
+  }
+
+  await check('J8-C : lecture inaccessible, écriture refusée et écriture ignorée sans faux succès ni perte du brouillon', async () => {
+    await click('Modifier le record', cleanCard)
+    await enter('#record-clean-and-jerk', '135')
+    const before = await storedRecords()
+    await evaluate(`window.j8get = Storage.prototype.getItem; Storage.prototype.getItem = function(key) {
+      if (key === 'liftboard.personal-records.v1') throw new Error('Denied'); return window.j8get.call(this, key)
+    }`)
+    await click('Enregistrer', cleanCard)
+    assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '135')
+    assert.match(await call(scope => document.querySelector(`${scope} [role=alert]`).textContent, cleanCard), /lire/)
+    await evaluate('Storage.prototype.getItem = window.j8get')
+    assert.deepEqual(await storedRecords(), before)
+    await click('Réessayer le chargement')
+    for (const mode of ['denied', 'quota', 'silent']) {
+      await call(mode => {
+        window.j8set = Storage.prototype.setItem
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'liftboard.personal-records.v1') {
+            if (mode === 'silent') return
+            throw new DOMException('Denied', mode === 'quota' ? 'QuotaExceededError' : 'SecurityError')
+          }
+          return window.j8set.call(this, key, value)
+        }
+      }, mode)
+      await click('Enregistrer', cleanCard)
+      assert.deepEqual(await storedRecords(), before)
+      assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '135')
+      assert.equal(await call(scope => Boolean(document.querySelector(`${scope} [role=alert]`)), cleanCard), true)
+      await evaluate('Storage.prototype.setItem = window.j8set')
+    }
+    await click('Enregistrer', cleanCard)
+    assert.deepEqual(await storedRecords(), [{ exerciseId: 'clean-and-jerk', oneRepMaxKg: 135 }])
+    await click('Séances', '.primary-nav')
+    const { backup } = await downloadCurrentBackup()
+    assert.deepEqual(backup.data.records, await storedRecords())
+    await evaluate('localStorage.setItem("liftboard.personal-records.v1", "[]")')
+    await reload()
+  })
+
+  const removalWorkout = structuredClone(j7planned)
+  removalWorkout.id = 'j8-removal'
+  removalWorkout.title = 'J8 Retrait d’exercice'
+  for (const set of removalWorkout.exercises[0].sets) delete set.execution
+  const otherBlock = structuredClone(removalWorkout.exercises[0])
+  otherBlock.id = 'j8-other-block'
+  otherBlock.exerciseId = 'clean-and-jerk'
+  otherBlock.sets.forEach((set, index) => { set.id = `j8-other-set-${index}` })
+  removalWorkout.exercises.push(otherBlock)
+  const draftBlocks = () => evaluate(`[...document.querySelectorAll('.workout-exercise')].map(block => ({
+    id: block.getAttribute('aria-labelledby'),
+    fields: [...block.querySelectorAll('input, select')].map(field => ({ id: field.id, value: field.value }))
+  }))`)
+  let removalDraft
+
+  await check('J8-D : exercice vierge retiré sans confirmation ni écriture de la séance persistée', async () => {
+    await call(workout => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([workout])), removalWorkout)
+    await reload()
+    await click('Ouvrir', '.workout-session-list')
+    await click('Modifier')
+    removalDraft = await draftBlocks()
+    await click('+ Ajouter un exercice')
+    await click('Retirer l’exercice', '.workout-exercise:nth-child(3)')
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.deepEqual(await draftBlocks(), removalDraft)
+    assert.deepEqual(await storedWorkouts(), [removalWorkout])
+    assert.equal(await evaluate('document.activeElement.textContent.trim()'), '+ Ajouter un exercice')
+  })
+
+  await check('J8-D : confirmation lisible, annulation et Échap conservent toutes les séries et le focus', async () => {
+    await evaluate('document.querySelector(".workout-exercise .workout-remove").focus({preventScroll:true})')
+    await click('Retirer l’exercice', '.workout-exercise:nth-child(1)')
+    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Exercice|exercice 1 : Snatch/)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
+    assert.deepEqual(await draftBlocks(), removalDraft)
+    assert.deepEqual(await storedWorkouts(), [removalWorkout])
+    for (const width of [320, 393, 430, 768, 1440]) await viewport(width, 'j8-remove', width === 320)
+    await click('Annuler', 'dialog[open]')
+    assert.deepEqual(await draftBlocks(), removalDraft)
+    assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), 'Retirer l’exercice 1 : Snatch et toutes ses séries')
+    await click('Retirer l’exercice', '.workout-exercise:nth-child(1)')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await settle()
+    assert.deepEqual(await draftBlocks(), removalDraft)
+    assert.deepEqual(await storedWorkouts(), [removalWorkout])
+  })
+
+  await check('J8-D : confirmation clavier retire uniquement le bloc ciblé, puis enregistrement explicite', async () => {
+    await click('Retirer l’exercice', '.workout-exercise:nth-child(1)')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Retirer l’exercice')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.deepEqual(await draftBlocks(), [removalDraft[1]])
+    assert.deepEqual(await storedWorkouts(), [removalWorkout], 'Le retrait reste uniquement dans le brouillon')
+    assert.equal(await evaluate('document.activeElement.textContent.trim()'), '+ Ajouter un exercice')
+    await click('Enregistrer les modifications')
+    assert.deepEqual((await storedWorkouts())[0].exercises, [otherBlock])
+    await evaluate('localStorage.setItem("liftboard.workouts.v1", "[]")')
     await reload()
   })
 
@@ -1895,7 +2298,7 @@ try {
   })
 
   assert.deepEqual(browserErrors, [], 'Aucune exception JavaScript dans le navigateur')
-  console.log(`${passed} parcours navigateur réussis. Captures et profil isolé : ${artifactDirectory}`)
+  console.log(`${passed} parcours navigateur réussis, 0 échoué. Captures et profil isolé : ${artifactDirectory}`)
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {
     await command('Browser.close').catch(() => {})

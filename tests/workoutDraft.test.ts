@@ -5,6 +5,7 @@ import {
   createWorkoutExerciseDraft,
   createWorkoutSetDraft,
   getWorkoutSetLoad,
+  hasWorkoutExerciseData,
   isValidWorkoutDate,
   localDateString,
   parseRepetitions,
@@ -62,6 +63,21 @@ describe('saisies des séries', () => {
 })
 
 describe('brouillon et transformation métier', () => {
+  it('distingue un bloc vierge des saisies ou paramètres à protéger avant retrait', () => {
+    const empty = createWorkoutExerciseDraft()
+    assert.equal(hasWorkoutExerciseData(empty), false)
+    assert.equal(hasWorkoutExerciseData({ ...empty, sets: [] }), false)
+    assert.equal(hasWorkoutExerciseData(createWorkoutExerciseDraft('clean-and-jerk')), true)
+    assert.equal(hasWorkoutExerciseData({ ...empty, sets: [...empty.sets, createWorkoutSetDraft()] }), true)
+    for (const fields of [
+      { repsInput: '0' }, { repsInput: ' ' }, { intensityInput: '75,' },
+      { rounding: { mode: 'up', increment: 2.5 } as const }, { savedLoad: null },
+    ]) {
+      assert.equal(hasWorkoutExerciseData({ ...empty, sets: [{ ...empty.sets[0], ...fields }] }), true)
+    }
+    assert.equal(hasWorkoutExerciseData(validDraft().exercises[0]), true)
+  })
+
   it('initialise un brouillon et des séries sans recommandations de répétitions ou d’intensité', () => {
     const draft = createWorkoutDraft()
     const block = createWorkoutExerciseDraft()

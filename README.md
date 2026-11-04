@@ -2,8 +2,8 @@
 
 ## LiftBoard — sauvegardes J7
 
-Dans **Mes séances → Sauvegarde des données**, « Exporter mes données » télécharge
-les données enregistrées et « Restaurer une sauvegarde » ouvre un aperçu local.
+Dans **Mes séances → Sauvegarde des données**, « Télécharger ma sauvegarde » télécharge
+les données enregistrées et « Récupérer mes données » permet de sélectionner un fichier JSON pour ouvrir un aperçu local.
 L’aperçu indique le nombre de Records et de séances planifiées/terminées, permet
 d’exporter les données actuelles et exige une confirmation avant le remplacement
 complet. Annuler ne modifie aucune donnée métier. Aucun fichier n’est envoyé à un serveur.

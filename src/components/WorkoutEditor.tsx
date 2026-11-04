@@ -5,6 +5,7 @@ import {
   createWorkoutSetDraft,
   changeDraftMovement,
   getWorkoutSetLoad,
+  hasWorkoutExerciseData,
   updateDraftExercise,
   updateDraftSet,
   validateWorkoutDraft,
@@ -13,6 +14,7 @@ import { roundingIncrements } from '../lib/loadCalculator'
 import { handleNumericArrow } from '../lib/numericInput'
 import type { WorkoutDraft, WorkoutDraftErrors, WorkoutExerciseDraft, WorkoutSetRounding } from '../types/workout'
 import WorkoutNotesFields from './WorkoutNotesFields'
+import WorkoutConfirmation from './WorkoutConfirmation'
 
 // Un seul contrôle combine le pas et la direction pour rester compact sur mobile.
 const roundingOptions: { value: string; label: string; rounding: WorkoutSetRounding }[] = [
@@ -277,7 +279,16 @@ type WorkoutEditorProps = {
 
 function WorkoutEditor({ draft, storedRecords, onChange, onOpenRecords, showErrors = false }: WorkoutEditorProps) {
   const addExerciseButton = useRef<HTMLButtonElement>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<WorkoutExerciseDraft | null>(null)
   const { errors } = validateWorkoutDraft(draft)
+
+  function removeExercise(blockId: string) {
+    onChange((current) => ({
+      ...current, exercises: current.exercises.filter((item) => item.id !== blockId),
+    }))
+    setPendingRemoval(null)
+    requestAnimationFrame(() => addExerciseButton.current?.focus({ preventScroll: true }))
+  }
 
   return (
     <div className="workout-editor">
@@ -318,10 +329,8 @@ function WorkoutEditor({ draft, storedRecords, onChange, onOpenRecords, showErro
             onOpenRecords={onOpenRecords}
             showErrors={showErrors}
             onRemove={() => {
-              onChange((current) => ({
-                ...current, exercises: current.exercises.filter((item) => item.id !== block.id),
-              }))
-              addExerciseButton.current?.focus({ preventScroll: true })
+              if (hasWorkoutExerciseData(block)) setPendingRemoval(block)
+              else removeExercise(block.id)
             }}
           />
         ))}
@@ -345,6 +354,15 @@ function WorkoutEditor({ draft, storedRecords, onChange, onOpenRecords, showErro
           onChange((current) => ({ ...current, notes: { ...current.notes, [category]: text } }))
         } />
       </details>
+      {pendingRemoval && (
+        <WorkoutConfirmation title="Retirer cet exercice ?" confirmLabel="Retirer l’exercice"
+          onCancel={() => setPendingRemoval(null)} onConfirm={() => removeExercise(pendingRemoval.id)}>
+          <p>
+            L’exercice {draft.exercises.findIndex((block) => block.id === pendingRemoval.id) + 1} : {exercises.find((exercise) => exercise.id === pendingRemoval.exerciseId)?.name} et toutes ses séries seront retirés du brouillon.
+            {' '}Enregistrez ensuite la séance pour conserver ce changement.
+          </p>
+        </WorkoutConfirmation>
+      )}
     </div>
   )
 }

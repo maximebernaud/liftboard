@@ -75,6 +75,13 @@ export function createWorkoutExerciseDraft(
   return { id: crypto.randomUUID(), exerciseId, sets: [createWorkoutSetDraft()] }
 }
 
+/** Une saisie même invalide, un mouvement choisi ou une structure ajoutée mérite confirmation. */
+export function hasWorkoutExerciseData(block: WorkoutExerciseDraft): boolean {
+  return block.exerciseId !== exercises[0].id || block.sets.length > 1 || block.sets.some((set) =>
+    set.repsInput !== '' || set.intensityInput !== '' || set.rounding.mode !== 'exact' || set.savedLoad !== undefined,
+  )
+}
+
 export function parseRepetitions(input: string): number | null {
   if (!/^\d+$/.test(input.trim())) return null
   const value = Number(input.trim())

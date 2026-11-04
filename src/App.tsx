@@ -6,7 +6,7 @@ import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
 import WorkoutSessions, { type WorkoutSessionsScreen } from './components/WorkoutSessions'
 import WorkoutHistory, { type HistoryView } from './components/WorkoutHistory'
-import { loadPersonalRecords, savePersonalRecords, type PersonalRecord } from './data/personalRecords'
+import { loadPersonalRecords, mutatePersonalRecord, recordsStorageKey, type RecordMutation } from './data/personalRecords'
 import { loadWorkouts, workoutsStorageKey, type WorkoutsResult } from './data/workouts'
 import { findTrackedWorkout, loadNavigation, saveNavigation, type SectionId } from './lib/navigation'
 import { historyFiltersForWorkout, type HistoryFilters } from './lib/workoutHistory'
@@ -44,11 +44,12 @@ function App() {
   useEffect(() => { saveNavigation(navigation) }, [navigation])
 
   useEffect(() => {
-    function refreshWorkouts(event: StorageEvent) {
+    function refreshStoredData(event: StorageEvent) {
       if (event.key === workoutsStorageKey || event.key === null) setStoredWorkouts(loadWorkouts())
+      if (event.key === recordsStorageKey || event.key === null) setStoredRecords(loadPersonalRecords())
     }
-    window.addEventListener('storage', refreshWorkouts)
-    return () => window.removeEventListener('storage', refreshWorkouts)
+    window.addEventListener('storage', refreshStoredData)
+    return () => window.removeEventListener('storage', refreshStoredData)
   }, [])
 
   const setTrackingWorkoutId = useCallback((id: string | null) => {
@@ -72,14 +73,10 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
 
-  function persistRecords(nextRecords: PersonalRecord[]): string | null {
-    try {
-      savePersonalRecords(nextRecords)
-      setStoredRecords({ records: nextRecords, error: null })
-      return null
-    } catch {
-      return 'Impossible d’enregistrer sur ce navigateur. Aucune modification n’a été sauvegardée. Réessayez.'
-    }
+  function persistRecords(mutation: RecordMutation): string | null {
+    const result = mutatePersonalRecord(mutation)
+    setStoredRecords(result.ok ? { records: result.records, error: null } : loadPersonalRecords())
+    return result.ok ? null : result.error
   }
 
   function openRecords() {

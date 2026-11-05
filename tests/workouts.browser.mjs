@@ -2169,7 +2169,7 @@ try {
       button.focus({ preventScroll: true })
       return { color: style.color, border: style.borderTopColor, background: style.backgroundColor }
     })()`)
-    assert.deepEqual(style, { color: 'rgb(212, 164, 90)', border: 'rgb(212, 164, 90)', background: 'rgb(27, 31, 32)' })
+    assert.deepEqual(style, { color: 'rgb(250, 204, 21)', border: 'rgb(250, 204, 21)', background: 'rgb(27, 31, 32)' })
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
     assert.equal(await evaluate('document.activeElement.classList.contains("workout-consult")'), true)

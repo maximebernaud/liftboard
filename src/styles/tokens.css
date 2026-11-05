@@ -5,19 +5,20 @@
   --lb-color-bg: #0F1112;
   --lb-color-surface: #1B1F20;
   --lb-color-raised: #252A2B;
-  --lb-color-accent: #D4A45A;
-  --lb-color-accent-hover: #E0B573;
+  --lb-color-accent: #FACC15;
+  --lb-color-accent-hover: #EAB308;
+  --lb-color-accent-active: #CA8A04;
 
   /* Textes */
   --lb-color-text: #F3F0E8;
   --lb-color-text-muted: #AAB0AD;
   --lb-color-text-subtle: #92A09E;
-  --lb-color-on-accent: #0F1112;
+  --lb-color-on-accent: #111827;
 
   /* Contours et états */
   --lb-color-border: #353A3A;
   --lb-color-control-border: #758482;
-  --lb-color-focus: #D4A45A;
+  --lb-color-focus: var(--lb-color-accent);
   --lb-color-success: #A6C7AC;
   --lb-color-warning: #E7BE83;
   --lb-color-danger: #F09A92;

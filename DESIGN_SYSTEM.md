@@ -5,6 +5,8 @@
 > **Produit :** application web d'haltérophilie, mobile-first  
 > **Stack cible :** React + TypeScript + Vite + CSS natif  
 > **Périmètre :** MVP — conception uniquement, aucune implémentation demandée
+>
+> **Accent J9 :** jaune vif validé — 5 novembre 2026
 
 ## 0. Vision et décisions structurantes
 
@@ -15,7 +17,7 @@ LiftBoard est **un outil d'entraînement**, pas une landing page ou un tableau d
 3. La marquer explicitement comme terminée.
 4. Renseigner ses records (1RM), calculer ses charges et retrouver ses séances.
 
-**Identité :** précision mécanique, puissance maîtrisée, sobriété industrielle. Palette graphite, ivoire et or mat. L'or signale une action, une sélection ou une donnée prioritaire ; il ne décore pas chaque élément.
+**Identité :** précision mécanique, puissance maîtrisée, sobriété industrielle. Palette graphite, ivoire et jaune vif. Le jaune signale une action, une sélection ou une donnée prioritaire ; il ne décore pas chaque élément.
 
 **Règle absolue :** sur l'écran initial, afficher les séances et une action « Nouvelle séance ». Pas de hero, slogan géant, image plein écran ou statistiques sans utilité immédiate.
 
@@ -33,19 +35,20 @@ Ces variables constituent **la source unique de vérité** des couleurs et des m
   --lb-color-bg: #0F1112;          /* Fond global, app shell */
   --lb-color-surface: #1B1F20;     /* Cartes, navigation, formulaires */
   --lb-color-raised: #252A2B;      /* Inputs, zones secondaires, hover */
-  --lb-color-accent: #D4A45A;      /* CTA primaire, actif, valeurs importantes */
-  --lb-color-accent-hover: #E0B573;
+  --lb-color-accent: #FACC15;      /* CTA primaire, sélection, valeurs importantes */
+  --lb-color-accent-hover: #EAB308;
+  --lb-color-accent-active: #CA8A04;
 
   /* Textes */
   --lb-color-text: #F3F0E8;        /* Texte courant et valeurs principales */
   --lb-color-text-muted: #AAB0AD;  /* Descriptions, libellés secondaires */
   --lb-color-text-subtle: #92A09E; /* Métadonnées non essentielles */
-  --lb-color-on-accent: #0F1112;   /* Texte/icône sur fond or */
+  --lb-color-on-accent: #111827;   /* Texte/icône sur fond jaune */
 
   /* Contours */
   --lb-color-border: #353A3A;          /* Séparations et bordures décoratives */
   --lb-color-control-border: #758482;  /* Contours des champs/contrôles identifiables */
-  --lb-color-focus: #D4A45A;
+  --lb-color-focus: var(--lb-color-accent);
 
   /* États sémantiques : ponctuels, jamais couleurs de marque */
   --lb-color-success: #A6C7AC;    /* Séance terminée + confirmation */
@@ -92,9 +95,12 @@ Ces variables constituent **la source unique de vérité** des couleurs et des m
 **Contrastes vérifiés (ratios approximatifs)** :
 - Ivoire `#F3F0E8` sur fond `#0F1112` : **16,62:1**.
 - Gris `#AAB0AD` sur surface `#1B1F20` : **7,54:1**.
-- Or `#D4A45A` sur surface `#1B1F20` : **7,33:1**.
-- Noir graphite sur or `#D4A45A` : **8,35:1**.
+- Jaune `#FACC15` sur surface `#1B1F20` : **10,85:1** ; sur `raised` `#252A2B` : **9,49:1**.
+- Texte/icône `#111827` sur jaune `#FACC15` : **11,58:1**.
+- Texte/icône `#111827` sur hover `#EAB308` : **9,25:1** ; sur active `#CA8A04` : **6,04:1**.
 - Contour interactif `#758482` sur surface surélevée `#252A2B` : **3,72:1**.
+
+**Focus J9 :** conserver l'anneau externe de 2 px avec un écart de 2 px, en jaune opaque `#FACC15`. La proposition `rgba(250, 204, 21, 0.35)` seule donne environ **2,41 à 2,48:1** sur les trois surfaces sombres, sous la cible de 3:1 ; le jaune opaque atteint au minimum **9,49:1**. Les surfaces neutres et les couleurs sémantiques restent inchangées.
 
 Vérifier les autres combinaisons réelles au moment de l'implémentation. Une bordure décorative discrète n'est **pas** un contour suffisant pour un contrôle interactif.
 
@@ -172,7 +178,7 @@ Polices de repli : `Arial Narrow, Arial, sans-serif` pour les titres ; `Arial, s
 - **Desktop** : marges adaptées, colonne de formulaire limitée à `680px`, espace de travail limité à `1040px`.
 - **Surfaces** : fond graphite, cartes anthracite, zones imbriquées `raised`. Maximum deux niveaux de panneaux dans le parcours courant.
 - **Rayons** : 12 px pour inputs/boutons, 16 px pour cartes principales, 8 px pour badges.
-- **Bordures** : 1 px ; pas de glow, effet verre, bordures dorées continues ou ombre forte. L'élévation provient essentiellement du contraste entre surfaces.
+- **Bordures** : 1 px ; pas de glow, effet verre, bordures d'accent continues ou ombre forte. L'élévation provient essentiellement du contraste entre surfaces.
 - **Ombres** : absentes par défaut ; légères uniquement pour un élément flottant qui doit passer devant le contenu.
 
 ## 4. États transversaux et interactions
@@ -181,7 +187,7 @@ Polices de repli : `Arial Narrow, Arial, sans-serif` pour les titres ; `Arial, s
 |---|---|
 | Repos | Contraste stable ; action clairement reconnaissable |
 | Survol | Changement discret de surface, **jamais nécessaire** à la compréhension |
-| Focus clavier | Anneau externe or de **2 px**, écart d'environ **2 px** ; jamais supprimé sans remplacement |
+| Focus clavier | Anneau externe jaune opaque de **2 px**, écart d'environ **2 px** ; jamais supprimé sans remplacement |
 | Appui tactile | Variation brève de fond, pas d'animation complexe |
 | Sélectionné | Fond/bordure/indicateur + libellé ; jamais uniquement la couleur |
 | Désactivé | Aspect atténué, pas d'action possible, raison compréhensible si utile |
@@ -220,6 +226,7 @@ Utilisés pour record (1RM), séries, répétitions, intensité et charge.
 - Interdire valeurs non numériques ou incohérentes **selon les règles métier validées**, sans ajouter de limites arbitraires.
 - Pour les séries/répétitions, préférer des entrées simples et directes plutôt qu'un sélecteur spectaculaire.
 - Validation proche du champ ; conserver la saisie en cas d'erreur ; informer si un record manque.
+- Dans le suivi « Réalisé », les deux colonnes partagent les lignes des labels, des saisies et des erreurs via CSS `subgrid`. La hauteur s'adapte au label le plus long et aux textes agrandis, sans hauteur fixe ; les espacements de 8 px sont conservés.
 - Afficher la charge calculée avec l'unité et la règle d'arrondi choisie. **Règle à confirmer avec Khaled :** arrondi usuel à 2,5 kg pour les mouvements avec barre ; ne pas l'imposer sans validation.
 
 ### 5.3 Carte d'exercice
@@ -273,7 +280,7 @@ Style : `surface`, bordure décorative `border`, rayon 16 px, padding 16 px, esp
 4. **Historique** — liste et consultation des séances terminées.
 
 - Barre en bas, persistante sur les écrans principaux.
-- Icône + libellé toujours visible ; état actif avec or et repère additionnel (fond, trait, etc.).
+- Icône + libellé toujours visible ; état actif avec jaune et repère additionnel (fond, trait, etc.).
 - Hauteur de contenu cible : 72 px, **plus** `env(safe-area-inset-bottom)` ; zones de touche ≥ 44 × 44 px.
 - Ne pas recouvrir le bas des listes/formulaires : réserver une zone de défilement supplémentaire tenant compte de la barre et du safe area.
 - Ne pas introduire un cinquième onglet « Accueil » ou « Dashboard ».
@@ -316,7 +323,7 @@ Seulement **deux statuts de séance** dans la V1 :
 - Les charges affichées pour une séance terminée doivent rester fidèles à celles enregistrées : une modification ultérieure du 1RM ne doit **pas recalculer silencieusement l'historique**.
 - La distinction des états ne repose jamais uniquement sur la couleur.
 
-Les badges restent secondaires par rapport au nom, aux exercices et aux charges. Le doré n'est **pas** un marqueur de statut « terminée ».
+Les badges restent secondaires par rapport au nom, aux exercices et aux charges. Le jaune d'accent n'est **pas** un marqueur de statut « terminée ».
 
 ## 8. États vides, erreurs et retours utilisateur
 

@@ -328,6 +328,26 @@
   font-weight: 600;
 }
 
+/* Lignes communes aux labels, saisies et erreurs, sans hauteur imposée. */
+.workout-execution-fields .workout-set-fields {
+  align-items: stretch;
+  row-gap: 0;
+}
+
+.workout-execution-fields .workout-field {
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  row-gap: 0;
+}
+
+.workout-execution-fields label {
+  margin-bottom: var(--lb-space-2);
+}
+
+.workout-execution-fields .record-error {
+  margin-top: var(--lb-space-2);
+}
+
 .workout-execution-completed {
   color: var(--lb-color-success);
 }

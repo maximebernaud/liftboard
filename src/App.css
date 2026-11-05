@@ -312,9 +312,12 @@
   background: var(--lb-color-accent);
 }
 
-.record-button-primary:hover,
-.record-button-primary:active {
+.record-button-primary:hover {
   background: var(--lb-color-accent-hover);
+}
+
+.record-button-primary:active {
+  background: var(--lb-color-accent-active);
 }
 
 .record-button-delete {

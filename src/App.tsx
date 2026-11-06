@@ -4,6 +4,7 @@ import DataBackup, { type BackupNotice } from './components/DataBackup'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
+import WorkoutConfirmation from './components/WorkoutConfirmation'
 import WorkoutSessions, { type WorkoutSessionsPending, type WorkoutSessionsScreen } from './components/WorkoutSessions'
 import WorkoutHistory, { type HistoryView } from './components/WorkoutHistory'
 import { loadPersonalRecords, mutatePersonalRecord, recordsStorageKey, type RecordMutation } from './data/personalRecords'
@@ -36,6 +37,7 @@ function App() {
   const [pendingRecords, setPendingRecords] = useState(false)
   const [pendingSessions, setPendingSessions] = useState<WorkoutSessionsPending>({ restoreBlocked: false, replacement: null })
   const [pendingHistory, setPendingHistory] = useState(false)
+  const [returningToSessions, setReturningToSessions] = useState(false)
   const [backupNotice, setBackupNotice] = useState<BackupNotice>(null)
   const recordsNavButton = useRef<HTMLButtonElement>(null)
   const sessionsNavButton = useRef<HTMLButtonElement>(null)
@@ -60,6 +62,27 @@ function App() {
     if (section === 'sessions' || section === 'history') setStoredWorkouts(loadWorkouts())
     setWorkoutNotice(null)
     setNavigation((current) => ({ ...current, section }))
+  }
+
+  function selectMainSection(section: SectionId) {
+    // Un clic principal vise la liste ; les parcours métier gardent leur destination.
+    if (section === 'sessions' && pendingSessions.replacement) {
+      setReturningToSessions(true)
+      return
+    }
+    openMainSection(section)
+  }
+
+  function openMainSection(section: SectionId) {
+    if (section === 'sessions') setSessionsScreen((current) => ({ ...current, view: 'list' }))
+    // Les notes historiques restent montées et récupérables depuis la liste.
+    if (section === 'history') setHistoryView({ workoutId: null, notes: false })
+    setReturnToWorkout(false)
+    setActiveSection(section)
+    if (section === 'sessions' || section === 'history') requestAnimationFrame(() => {
+      document.getElementById(section === 'sessions' ? 'workout-page-title' : 'history-page-title')?.focus({ preventScroll: true })
+      window.scrollTo({ top: 0, behavior: 'instant' })
+    })
   }
 
   function finishWorkout(result: Extract<WorkoutsResult, { ok: true }>, id: string) {
@@ -135,10 +158,7 @@ function App() {
                   type="button"
                   aria-current={activeSection === section.id ? 'page' : undefined}
                   aria-controls="main-content"
-                  onClick={() => {
-                    setReturnToWorkout(false)
-                    setActiveSection(section.id)
-                  }}
+                  onClick={() => selectMainSection(section.id)}
                 >
                   <SectionIcon name={section.id} />
                   <span>{section.label}</span>
@@ -220,6 +240,19 @@ function App() {
             }} />
         </section>
       </main>
+      {returningToSessions && <WorkoutConfirmation title="Modifications non enregistrées"
+        cancelLabel="Continuer ma saisie" confirmLabel="Abandonner et afficher Mes séances"
+        onCancel={() => {
+          setReturningToSessions(false)
+          resumeWorkout()
+          requestAnimationFrame(() => sessionsNavButton.current?.focus({ preventScroll: true }))
+        }} onConfirm={() => {
+          pendingSessions.replacement?.onReplaced()
+          setReturningToSessions(false)
+          openMainSection('sessions')
+        }}>
+        <p>Le retour à Mes séances abandonnera les performances ou notes non enregistrées de <strong>{pendingSessions.replacement?.title}</strong>. Les données déjà enregistrées seront conservées.</p>
+      </WorkoutConfirmation>}
     </div>
   )
 }

@@ -65,7 +65,7 @@ export default function DataBackup({ restoreBlocked, notice, onNoticeChange, onR
   return (
     <section className="data-backup" aria-labelledby="data-backup-title" aria-busy={reading}>
       <h2 id="data-backup-title">Sauvegarder mes entraînements</h2>
-      <p className="record-hint">Télécharge une copie de tes records, séances et notes pour pouvoir les retrouver si tu changes d'appareil ou de navigateur chiby 🤞</p>
+      <p className="record-hint">Télécharge une copie de tes records, séances et notes pour les retrouver si tu changes d'appareil ou de navigateur.</p>
       <div className="data-backup-actions">
         <button className="record-button" type="button" onClick={exportCurrent}>Télécharger ma sauvegarde</button>
         <button ref={restoreButton} className="record-button" type="button" disabled={reading} aria-haspopup="dialog" onClick={() => fileInput.current?.click()}>Récupérer mes données</button>
@@ -75,7 +75,7 @@ export default function DataBackup({ restoreBlocked, notice, onNoticeChange, onR
         event.currentTarget.value = '' // Autoriser une nouvelle sélection du même fichier après une erreur.
         if (file) void selectFile(file)
       }} />
-      <p className="record-hint">Seules tes données déjà enregistrées sont sauvegardées. Pense à conserver ton fichier en lieu sûr la zez.</p>
+      <p className="record-hint">Seules les données déjà enregistrées sont sauvegardées. Conserve ton fichier de sauvegarde en lieu sûr.</p>
       {restoreBlocked && <p className="record-hint">{pendingMessage}</p>}
       {reading && <p className="record-hint" role="status">Lecture et vérification de la sauvegarde…</p>}
       {notice && !preview && <p className={notice.error ? 'record-error' : 'data-backup-notice'} role={notice.error ? 'alert' : 'status'}>{notice.message}</p>}

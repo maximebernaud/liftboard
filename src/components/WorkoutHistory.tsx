@@ -80,7 +80,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
 
   return (
     <div className="workout-sessions workout-history">
-      {notesWorkout && (
+      {notesWorkout && (view.notes || pendingNotes) && (
         <div ref={notesPanel} hidden={!view.notes}>
           <WorkoutQuickNotes key={notesWorkout.id} workout={notesWorkout} headingId={view.notes ? 'history-page-title' : 'history-notes-page-title'}
             returnLabel="Retour à la séance" onPendingChange={setPendingNotes} onSaved={onStoredChange}

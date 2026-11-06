@@ -12,7 +12,7 @@ import WorkoutQuickNotes from './WorkoutQuickNotes'
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 export type HistoryView = { workoutId: string | null; notes: boolean }
 
-export default function WorkoutHistory({ stored, onStoredChange, onSessions, onReopened, filters, onFiltersChange, view, onViewChange, onPendingChange }: {
+export default function WorkoutHistory({ stored, onStoredChange, onSessions, onReopened, filters, onFiltersChange, view, onViewChange, onPendingChange, pendingSessionTitle }: {
   stored: WorkoutsResult
   onStoredChange: (result: WorkoutsResult) => void
   onSessions: () => void
@@ -22,6 +22,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   view: HistoryView
   onViewChange: (view: HistoryView) => void
   onPendingChange: (pending: boolean) => void
+  pendingSessionTitle: string | null
 }) {
   const selectedId = view.workoutId
   const [notesWorkout, setNotesWorkout] = useState<Workout | null>(null)
@@ -172,7 +173,10 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
           )}
         </>
       )}
-      {reopening && <WorkoutConfirmation title="Réouvrir cette séance ?" confirmLabel="Réouvrir la séance" destructive={false}
+      {reopening && <WorkoutConfirmation
+        title={pendingSessionTitle ? 'Modifications non enregistrées' : 'Réouvrir cette séance ?'}
+        confirmLabel={pendingSessionTitle ? `Abandonner et réouvrir ${reopening.title}` : 'Réouvrir la séance'}
+        cancelLabel={pendingSessionTitle ? 'Continuer ma saisie' : 'Annuler'} destructive={Boolean(pendingSessionTitle)}
         error={error} onCancel={() => { setReopening(null); setError(null) }} onConfirm={() => {
           const result = reopenWorkout(reopening)
           if (!result.ok) { setError(result.error); return }
@@ -181,6 +185,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
           setError(null)
           onReopened(result, reopening.id)
         }}>
+        {pendingSessionTitle && <p>Vous avez des modifications non enregistrées dans <strong>{pendingSessionTitle}</strong>. Si vous réouvrez <strong>{reopening.title}</strong>, ces modifications seront perdues. Les données déjà enregistrées resteront conservées.</p>}
         <p><strong>{reopening.title}</strong> redeviendra planifiée et quittera l’Historique. Vous pourrez reprendre son suivi.</p>
         <p>Toutes les performances, les notes et la programmation seront conservées.</p>
       </WorkoutConfirmation>}

@@ -4,7 +4,7 @@ import DataBackup, { type BackupNotice } from './components/DataBackup'
 import Header from './components/Header'
 import PersonalRecords from './components/PersonalRecords'
 import SectionIcon from './components/SectionIcon'
-import WorkoutSessions, { type WorkoutSessionsScreen } from './components/WorkoutSessions'
+import WorkoutSessions, { type WorkoutSessionsPending, type WorkoutSessionsScreen } from './components/WorkoutSessions'
 import WorkoutHistory, { type HistoryView } from './components/WorkoutHistory'
 import { loadPersonalRecords, mutatePersonalRecord, recordsStorageKey, type RecordMutation } from './data/personalRecords'
 import { loadWorkouts, workoutsStorageKey, type WorkoutsResult } from './data/workouts'
@@ -34,7 +34,7 @@ function App() {
   const [returnToWorkout, setReturnToWorkout] = useState(false)
   const [dataRevision, setDataRevision] = useState(0)
   const [pendingRecords, setPendingRecords] = useState(false)
-  const [pendingSessions, setPendingSessions] = useState(false)
+  const [pendingSessions, setPendingSessions] = useState<WorkoutSessionsPending>({ restoreBlocked: false, replacement: null })
   const [pendingHistory, setPendingHistory] = useState(false)
   const [backupNotice, setBackupNotice] = useState<BackupNotice>(null)
   const recordsNavButton = useRef<HTMLButtonElement>(null)
@@ -105,7 +105,7 @@ function App() {
     setReturnToWorkout(false)
     setWorkoutNotice(null)
     setPendingRecords(false)
-    setPendingSessions(false)
+    setPendingSessions({ restoreBlocked: false, replacement: null })
     setPendingHistory(false)
     setNavigation({ section: 'sessions', trackingWorkoutId: null })
     // Remonter les composants métier écarte leurs anciennes copies en mémoire.
@@ -179,7 +179,7 @@ function App() {
             stored={storedWorkouts} onStoredChange={setStoredWorkouts} onCompleted={finishWorkout}
             screen={sessionsScreen} onScreenChange={setSessionsScreen} onTrackingChange={setTrackingWorkoutId}
             onPendingChange={setPendingSessions} backupPanel={<DataBackup
-              restoreBlocked={pendingRecords || pendingSessions || pendingHistory}
+              restoreBlocked={pendingRecords || pendingSessions.restoreBlocked || pendingHistory}
               notice={backupNotice} onNoticeChange={setBackupNotice}
               onRestored={() => refreshAfterRestore()} onRecoveryFailed={refreshAfterRestore} />} />
         </section>
@@ -207,12 +207,15 @@ function App() {
           <WorkoutHistory key={dataRevision} stored={storedWorkouts} onStoredChange={setStoredWorkouts} onSessions={resumeWorkout}
             filters={historyFilters} onFiltersChange={setHistoryFilters} view={historyView} onViewChange={setHistoryView}
             onPendingChange={setPendingHistory}
+            pendingSessionTitle={pendingSessions.replacement?.title ?? null}
             onReopened={(result, id) => {
+              // Abandonner les saisies remplacées uniquement après l'écriture réussie.
+              pendingSessions.replacement?.onReplaced()
               setStoredWorkouts(result)
               setSessionsScreen({ selected: findTrackedWorkout(result.workouts, id), view: 'detail' })
               setNavigation({ section: 'sessions', trackingWorkoutId: null })
               setWorkoutNotice(null)
-              document.getElementById('main-content')?.focus({ preventScroll: true })
+              requestAnimationFrame(() => document.getElementById('main-content')?.focus({ preventScroll: true }))
               window.scrollTo({ top: 0, behavior: 'instant' })
             }} />
         </section>

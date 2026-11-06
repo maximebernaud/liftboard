@@ -2265,6 +2265,263 @@ try {
     await click('← Retour à l’historique', historyScope)
   })
 
+  // J10-B : la réouverture ne doit remplacer une saisie qu'après accord et écriture réussie.
+  const j10Scope = 'section[aria-label="Séances"]'
+  const j10Load = '#execution-j10-a-set-loadKg'
+  const j10Reps = '#execution-j10-a-set-reps'
+  const j10Workouts = ['a', 'b', 'c'].map((id, index) => ({
+    id: `j10-${id}`, title: `TEST ${id.toUpperCase()}`, date: '2026-11-06',
+    status: index === 0 ? 'planned' : 'completed',
+    notes: { before: 'Consigne enregistrée', during: '', after: 'Bilan enregistré' },
+    exercises: [{ id: `j10-${id}-block`, exerciseId: 'snatch', sets: [{
+      id: `j10-${id}-set`, reps: 3, intensityPct: 75, rounding: { mode: 'exact' },
+      load: { exactKg: 75, selectedKg: 75 }, execution: { completed: true, reps: 3, loadKg: 75 },
+    }] }],
+  }))
+
+  async function setupJ10(workouts = j10Workouts) {
+    await call(workouts => {
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+      sessionStorage.removeItem('liftboard.navigation.v1')
+    }, workouts)
+    await reload(true)
+    await click('Ouvrir', '[aria-labelledby="card-j10-a"]')
+    await click('Reprendre le suivi')
+  }
+
+  async function requestJ10Reopen() {
+    await click('Historique', '.primary-nav')
+    await click('Consulter la séance', '[aria-labelledby="history-card-j10-b"]')
+    await call(() => {
+      window.j10ReopenButton = [...document.querySelectorAll('.workout-history button')]
+        .find(button => button.textContent === 'Réouvrir la séance')
+      window.j10ReopenButton.focus({ preventScroll: true })
+    })
+    await click('Réouvrir la séance', historyScope)
+  }
+
+  const j10Value = selector => call(selector => document.querySelector(selector).value, selector)
+  const j10Navigation = () => evaluate('sessionStorage.getItem("liftboard.navigation.v1")')
+  const j10Expected = () => j10Workouts.map(workout => workout.id === 'j10-b' ? { ...workout, status: 'planned' } : workout)
+
+  await check('J10-B : correction 75 → 77,5 et répétitions conservées après annulation et Échap, sans écriture', async () => {
+    await setupJ10()
+    await enter(j10Load, '77,5')
+    await enter(j10Reps, '2')
+    await call(() => {
+      window.j10OriginalSetItem = Storage.prototype.setItem
+      window.j10Writes = 0
+      Storage.prototype.setItem = function(key, value) {
+        if (key === 'liftboard.workouts.v1') window.j10Writes++
+        return window.j10OriginalSetItem.call(this, key, value)
+      }
+      window.j10LoadField = document.querySelector('#execution-j10-a-set-loadKg')
+    })
+    await requestJ10Reopen()
+    const navigation = await j10Navigation()
+    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Modifications non enregistrées')
+    assert.match(await evaluate('document.querySelector("dialog[open] .record-dialog-description").textContent'), /TEST A.*TEST B.*données déjà enregistrées resteront conservées/s)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer ma saisie')
+    assert.equal(await evaluate(`(() => {
+      const dialog = document.querySelector('dialog[open]')
+      return document.getElementById(dialog.getAttribute('aria-labelledby')) === dialog.querySelector('h3') &&
+        document.getElementById(dialog.getAttribute('aria-describedby')) === dialog.querySelector('.record-dialog-description')
+    })()`), true)
+    assert.deepEqual(await storedWorkouts(), j10Workouts)
+    for (const width of [320, 393, 768, 1440]) await viewport(width, 'j10-reopen-confirmation', width === 320, 'history')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Abandonner et réouvrir TEST B')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer ma saisie')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.equal(await evaluate('document.activeElement === window.j10ReopenButton'), true)
+    assert.equal(await j10Navigation(), navigation)
+    await click('Réouvrir la séance', historyScope)
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await settle()
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('document.activeElement === window.j10ReopenButton'), true)
+    assert.equal(await j10Navigation(), navigation)
+    assert.equal(await evaluate('window.j10Writes'), 0)
+    assert.deepEqual(await storedWorkouts(), j10Workouts)
+    await evaluate('Storage.prototype.setItem = window.j10OriginalSetItem')
+    await click('Séances', '.primary-nav')
+    assert.equal(await j10Value(j10Load), '77,5')
+    assert.equal(await j10Value(j10Reps), '2')
+    assert.equal(await call(selector => window.j10LoadField === document.querySelector(selector), j10Load), true)
+  })
+
+  await check('J10-B : abandon volontaire, seule TEST B réouverte et suivi de TEST A toujours enregistré à 75', async () => {
+    await setupJ10()
+    await enter(j10Load, '77,5')
+    await requestJ10Reopen()
+    await click('Abandonner et réouvrir TEST B', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), j10Expected())
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'TEST B')
+    assert.equal(await evaluate('document.activeElement.id'), 'main-content')
+    assert.equal(await guardActive(), false)
+    await click('Historique', '.primary-nav')
+    assert.equal(await evaluate('Boolean(document.querySelector("[aria-labelledby=history-card-j10-b]"))'), false)
+    await click('Consulter la séance', '[aria-labelledby="history-card-j10-c"]')
+    await click('Réouvrir la séance', historyScope)
+    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Annuler', 'dialog[open]')
+    await click('Séances', '.primary-nav')
+    await click('← Retour aux séances', j10Scope)
+    await click('Ouvrir', '[aria-labelledby="card-j10-a"]')
+    await click('Reprendre le suivi')
+    assert.equal(await j10Value(j10Load), '75')
+    assert.deepEqual(await storedWorkouts(), j10Expected())
+  })
+
+  for (const [field, value] of [[j10Load, '77,'], [j10Reps, 'abc'], [j10Load, '']]) {
+    await check(`J10-B : saisie partielle, invalide ou effacée protégée (${value || 'champ vide'})`, async () => {
+      await setupJ10()
+      await enter(field, value)
+      // Le suivi reste monté mais est masqué derrière les notes puis l'Historique.
+      await click('Notes de séance', j10Scope)
+      await requestJ10Reopen()
+      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Séances', '.primary-nav')
+      await click('← Retour au suivi', j10Scope)
+      assert.equal(await j10Value(field), value)
+      assert.deepEqual(await storedWorkouts(), j10Workouts)
+      assert.equal(await guardActive(), true)
+    })
+  }
+
+  for (const failure of ['QuotaExceededError', 'SecurityError']) {
+    await check(`J10-B : notes en échec conservées après annulation, catégories masquées (${failure})`, async () => {
+      await setupJ10()
+      await click('Notes de séance', j10Scope)
+      await call(failure => {
+        window.j10OriginalSetItem = Storage.prototype.setItem
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'liftboard.workouts.v1') throw new DOMException('Test J10', failure)
+          return window.j10OriginalSetItem.call(this, key, value)
+        }
+      }, failure)
+      await enter(`${j10Scope} textarea`, 'Note Pendant non enregistrée')
+      await click('Avant', j10Scope)
+      await enter(`${j10Scope} textarea`, 'Note Avant non enregistrée')
+      await click('Après', j10Scope)
+      await evaluate('Storage.prototype.setItem = window.j10OriginalSetItem')
+      await requestJ10Reopen()
+      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Séances', '.primary-nav')
+      await click('Pendant', j10Scope)
+      assert.equal(await j10Value(`${j10Scope} textarea`), 'Note Pendant non enregistrée')
+      await click('Avant', j10Scope)
+      assert.equal(await j10Value(`${j10Scope} textarea`), 'Note Avant non enregistrée')
+      assert.deepEqual(await storedWorkouts(), j10Workouts)
+      assert.equal(await guardActive(), true)
+    })
+  }
+
+  await check('J10-B : performances et notes en attente abandonnées ensemble seulement après réussite', async () => {
+    await setupJ10()
+    await enter(j10Load, '77,5')
+    await click('Notes de séance', j10Scope)
+    await evaluate(`window.j10OriginalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
+      if (key === 'liftboard.workouts.v1') throw new Error('Test J10')
+      return window.j10OriginalSetItem.call(this, key, value)
+    }`)
+    await enter(`${j10Scope} textarea`, 'Note temporaire à abandonner')
+    await requestJ10Reopen()
+    await click('Abandonner et réouvrir TEST B', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open] [role=alert]").textContent'), /Impossible d’écrire/)
+    assert.equal(await j10Value(j10Load), '77,5')
+    assert.equal(await j10Value(`${j10Scope} textarea`), 'Note temporaire à abandonner')
+    assert.deepEqual(await storedWorkouts(), j10Workouts)
+    await evaluate('Storage.prototype.setItem = window.j10OriginalSetItem')
+    await click('Abandonner et réouvrir TEST B', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), j10Expected())
+    assert.equal(await guardActive(), false)
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'TEST B')
+  })
+
+  await check('J10-B : aucune saisie menacée, confirmation habituelle et reprise inchangées', async () => {
+    await setupJ10()
+    await requestJ10Reopen()
+    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Réouvrir la séance', 'dialog[open]')
+    assert.deepEqual(await storedWorkouts(), j10Expected())
+    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'TEST B')
+    await click('Reprendre le suivi', j10Scope)
+    assert.equal(await evaluate('document.querySelector("#execution-j10-b-set-loadKg").value'), '75')
+    assert.equal(await guardActive(), false)
+  })
+
+  for (const failure of ['quota', 'denied', 'read', 'corrupt']) {
+    await check(`J10-B : réouverture en échec sans transition ni perte du brouillon (${failure})`, async () => {
+      await setupJ10()
+      await enter(j10Load, '77,5')
+      await requestJ10Reopen()
+      const navigation = await j10Navigation()
+      await call(failure => {
+        window.j10OriginalGetItem = Storage.prototype.getItem
+        window.j10OriginalSetItem = Storage.prototype.setItem
+        if (failure === 'corrupt') localStorage.setItem('liftboard.workouts.v1', '{corrompu J10')
+        if (failure === 'read') Storage.prototype.getItem = function(key) {
+          if (key === 'liftboard.workouts.v1') throw new Error('Test J10')
+          return window.j10OriginalGetItem.call(this, key)
+        }
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'liftboard.workouts.v1') throw new DOMException('Test J10', failure === 'quota' ? 'QuotaExceededError' : 'SecurityError')
+          return window.j10OriginalSetItem.call(this, key, value)
+        }
+      }, failure)
+      await click('Abandonner et réouvrir TEST B', 'dialog[open]')
+      assert.match(await evaluate('document.querySelector("dialog[open] [role=alert]").textContent'),
+        failure === 'quota' ? /plein/ : failure === 'read' ? /Impossible de lire/ : failure === 'corrupt' ? /illisibles/ : /Impossible d’écrire/)
+      assert.equal(await j10Navigation(), navigation)
+      assert.equal(await j10Value(j10Load), '77,5')
+      assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'TEST B')
+      assert.equal(await evaluate('document.querySelectorAll(".workout-notice[role=status]").length'), 0)
+      const raw = await evaluate('window.j10OriginalGetItem.call(localStorage, "liftboard.workouts.v1")')
+      assert.equal(raw, failure === 'corrupt' ? '{corrompu J10' : JSON.stringify(j10Workouts))
+      await evaluate('Storage.prototype.getItem = window.j10OriginalGetItem; Storage.prototype.setItem = window.j10OriginalSetItem')
+      if (failure === 'corrupt') await call(workouts => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts)), j10Workouts)
+      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Séances', '.primary-nav')
+      assert.equal(await j10Value(j10Load), '77,5')
+      assert.equal(await guardActive(), true)
+      assert.deepEqual(await storedWorkouts(), j10Workouts)
+    })
+  }
+
+  await check('J10-B : une correction enregistrée retire la garde de réouverture', async () => {
+    await setupJ10()
+    await enter(j10Load, '77,5')
+    await click('Enregistrer la correction', j10Scope)
+    await requestJ10Reopen()
+    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Réouvrir la séance', 'dialog[open]')
+    assert.equal((await storedWorkouts())[0].exercises[0].sets[0].execution.loadKg, 77.5)
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('J10-B : brouillon d’édition conservé sans avertissement d’abandon superflu', async () => {
+    await setupJ10()
+    await click('Retour aux séances', j10Scope)
+    await click('+ Nouvelle séance', j10Scope)
+    await enter('#workout-title', 'Brouillon à garder')
+    await requestJ10Reopen()
+    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Réouvrir la séance', 'dialog[open]')
+    await click('← Retour aux séances', j10Scope)
+    await click('Reprendre le brouillon', j10Scope)
+    assert.equal(await j10Value('#workout-title'), 'Brouillon à garder')
+    assert.deepEqual(await storedWorkouts(), j10Expected())
+    await click('Annuler', j10Scope)
+    await click('Abandonner les modifications', 'dialog[open]')
+  })
+
   await check('J6-B : stockage inaccessible et corrompu distincts de l’historique vide, sans écriture', async () => {
     await click('Historique', '.primary-nav')
     await evaluate(`window.originalGetItem = Storage.prototype.getItem; Storage.prototype.getItem = function(key) {

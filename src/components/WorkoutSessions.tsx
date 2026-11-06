@@ -18,6 +18,11 @@ export type WorkoutSessionsScreen = {
   view: 'list' | 'editor' | 'detail' | 'notes' | 'tracking'
 }
 
+export type WorkoutSessionsPending = {
+  restoreBlocked: boolean
+  replacement: { title: string; onReplaced: () => void } | null
+}
+
 type WorkoutSessionsProps = {
   storedRecords: RecordsLoadResult
   onOpenRecords: () => void
@@ -27,7 +32,7 @@ type WorkoutSessionsProps = {
   stored: WorkoutsResult
   onStoredChange: (result: WorkoutsResult) => void
   onCompleted: (result: Extract<WorkoutsResult, { ok: true }>, id: string) => void
-  onPendingChange: (pending: boolean) => void
+  onPendingChange: (pending: WorkoutSessionsPending) => void
   backupPanel: ReactNode
 }
 
@@ -56,7 +61,16 @@ function WorkoutSessions({ storedRecords, onOpenRecords, screen, onScreenChange,
   const trackingId = editable && (view === 'tracking' || (view === 'notes' && notesReturn === 'tracking')) ? selected?.id ?? null : null
 
   useEffect(() => { onTrackingChange(trackingId) }, [onTrackingChange, trackingId])
-  useEffect(() => { onPendingChange(Boolean(draft) || pendingNotes || pendingExecution) }, [draft, pendingNotes, pendingExecution, onPendingChange])
+  useEffect(() => {
+    onPendingChange({
+      restoreBlocked: Boolean(draft) || pendingNotes || pendingExecution,
+      // Le brouillon d'édition reste monté ; seuls suivi et notes seront remplacés.
+      replacement: pendingNotes || pendingExecution ? {
+        title: selected?.title ?? 'la séance en cours',
+        onReplaced: () => { setPendingNotes(false); setPendingExecution(false) },
+      } : null,
+    })
+  }, [draft, pendingNotes, pendingExecution, selected?.title, onPendingChange])
 
   useEffect(() => {
     if (focusOnViewChange.current) {

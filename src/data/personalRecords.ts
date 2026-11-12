@@ -1,11 +1,6 @@
-export const exercises = [
-  { id: 'snatch', name: 'Snatch', category: 'Mouvement olympique' },
-  { id: 'clean-and-jerk', name: 'Clean & Jerk', category: 'Mouvement olympique' },
-  { id: 'front-squat', name: 'Front Squat', category: 'Force' },
-  { id: 'back-squat', name: 'Back Squat', category: 'Force' },
-] as const
+import { exercises, type Exercise } from './exercises.ts'
 
-export type Exercise = (typeof exercises)[number]
+export { exercises, type Exercise } from './exercises.ts'
 
 export type PersonalRecord = {
   exerciseId: string

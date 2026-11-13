@@ -17,12 +17,22 @@ function focusExecutionControl(control: HTMLElement | null) {
   control?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
 }
 
-function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange }: {
+function nextUnstartedSetId(workout: Workout, afterId?: string): string | null {
+  const sets = workout.exercises.flatMap((block) => block.sets)
+  // Les résultats partiels ou anciens à corriger restent prioritaires et ouverts.
+  if (sets.some((set) => set.execution && (!set.execution.completed || requiresExecutionCorrection(set.execution)))) return null
+  const start = afterId === undefined ? 0 : sets.findIndex((set) => set.id === afterId) + 1
+  return sets.slice(start).find((set) => set.execution === undefined)?.id ?? null
+}
+
+function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSaved, onPendingChange }: {
   workout: Workout
   blockId: string
   set: WorkoutSet
   number: number
-  onSaved: (result: SavedResult) => void
+  selected: boolean
+  onSelect: (id: string | null) => void
+  onSaved: (result: SavedResult, newlyConfirmed: boolean) => void
   onPendingChange: (id: string, pending: boolean) => void
 }) {
   // La référence de conflit ne bouge qu'après notre propre écriture réussie.
@@ -42,9 +52,13 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
   const pending = dirty || attempt !== null
   const needsCorrection = requiresExecutionCorrection(saved)
   const confirmation = confirmSetExecution(set, inputs)
-  const canCompact = Boolean(saved?.completed) && !pending && !error && !needsCorrection &&
-    !invalid.reps && !invalid.loadKg && !(showRequired && Object.keys(confirmation.errors).length > 0)
-  const compact = canCompact && !editing
+  const untouched = saved === undefined && set.execution === undefined && inputs.reps === null && inputs.loadKg === null
+  const needsAttention = pending || Boolean(error) || needsCorrection || invalid.reps || invalid.loadKg ||
+    (showRequired && Object.keys(confirmation.errors).length > 0)
+  const canCompact = !needsAttention && (Boolean(saved?.completed) || untouched)
+  const compact = canCompact && (saved?.completed ? !editing : !selected)
+  const compactUnstarted = compact && !saved?.completed
+  const canConfirmPlanned = untouched && !needsAttention && confirmation.execution !== null
   const id = `execution-${set.id}`
 
   useEffect(() => { onPendingChange(set.id, pending) }, [onPendingChange, pending, set.id])
@@ -70,7 +84,7 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
     if (saved?.completed && !execution.completed) {
       requestAnimationFrame(() => focusExecutionControl(heading.current))
     }
-    onSaved(result)
+    onSaved(result, execution.completed && !saved?.completed)
   }
 
   function change(field: keyof ExecutionInputs, value: string) {
@@ -86,8 +100,17 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
     persist(partialSetExecution(next, saved))
   }
 
+  const openButton = <button ref={editButton} className="record-button workout-execution-toggle" type="button" hidden={!compact}
+    aria-label={`${saved?.completed ? 'Modifier' : 'Ajuster'} la série ${number}`} aria-expanded={!compact} aria-controls={`${id}-editor`}
+    aria-describedby={compact ? saved?.completed ? `${id}-result ${id}-planned-summary` : `${id}-planned-result` : undefined}
+    onClick={() => {
+      if (saved?.completed) setEditing(true)
+      else onSelect(set.id)
+      requestAnimationFrame(() => focusExecutionControl(form.current?.querySelector<HTMLInputElement>('input') ?? null))
+    }}>{saved?.completed ? 'Modifier' : 'Ajuster'}</button>
+
   return (
-    <form ref={form} id={`${id}-form`} aria-labelledby={`${id}-title`} className={`workout-execution-set${compact ? ' workout-execution-set-compact' : ''}`} noValidate onSubmit={(event) => {
+    <form ref={form} id={`${id}-form`} aria-labelledby={`${id}-title`} className={`workout-execution-set${compact ? ' workout-execution-set-compact' : ''}${compactUnstarted ? ' workout-execution-set-unstarted' : ''}`} noValidate onSubmit={(event) => {
       event.preventDefault()
       if (compact) return
       setShowRequired(true)
@@ -101,13 +124,26 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
             {needsCorrection ? 'À corriger' : saved?.completed ? '✓ Réalisée' : saved ? 'Saisie en cours' : 'À réaliser'}
           </span>
         </div>
-        <button ref={editButton} className="record-button workout-execution-toggle" type="button" hidden={!compact}
-          aria-label={`Modifier la série ${number}`} aria-expanded={!compact} aria-controls={`${id}-editor`}
-          aria-describedby={compact ? `${id}-result ${id}-planned-summary` : undefined} onClick={() => {
-            setEditing(true)
-            requestAnimationFrame(() => focusExecutionControl(form.current?.querySelector<HTMLInputElement>('input') ?? null))
-          }}>Modifier</button>
+        {!compactUnstarted && openButton}
       </div>
+      {compactUnstarted && <div className="workout-execution-compact-summary" role="group" aria-label="Programmation de la série">
+        <p id={`${id}-planned-result`} className="workout-execution-result">
+          <strong>{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : '—'}</strong>{' '}
+          <span>× {set.reps} rép.</span>{' '}
+          <span className="workout-execution-intensity">{executionNumberInput(set.intensityPct)} % du 1RM</span>
+        </p>
+        {!confirmation.execution && <p className="record-hint">
+          {set.load === null ? 'Charge prévue non renseignée.' : 'Charge prévue à vérifier.'} Ajustez la charge réalisée.
+        </p>}
+        <div className="workout-execution-planned-actions">
+          {openButton}
+          {canConfirmPlanned && <button className="record-button workout-execution-confirm-planned" type="button"
+            aria-label={`Confirmer tel que prévu : série ${number}`}
+            aria-describedby={`${id}-planned-result workout-execution-hint`} onClick={() => {
+              if (canConfirmPlanned && confirmation.execution) persist(confirmation.execution, true)
+            }}>Confirmer tel que prévu</button>}
+        </div>
+      </div>}
       {compact && saved?.completed && <div className="workout-execution-compact-summary">
         <p id={`${id}-result`} className="workout-execution-result">
           <strong>{executionNumberInput(saved.loadKg)} <span>kg</span></strong>{' '}
@@ -160,16 +196,19 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
             setInputs(executionInputs(saved)); setAttempt(null); setError(null); setShowRequired(false)
             requestAnimationFrame(() => focusExecutionControl(form.current?.querySelector<HTMLInputElement>('input') ?? null))
           }}>Rétablir les valeurs enregistrées</button>}
-          {saved?.completed && <button className="record-button workout-execution-close" type="button" disabled={!canCompact}
+          <button className="record-button workout-execution-close" type="button" disabled={!canCompact}
             aria-controls={`${id}-editor`} aria-expanded="true" aria-describedby={!canCompact ? `${id}-close-hint` : undefined}
             onClick={() => {
               if (!canCompact) return
-              setEditing(false)
+              if (saved?.completed) setEditing(false)
+              else onSelect(null)
               requestAnimationFrame(() => focusExecutionControl(editButton.current))
-            }}>Fermer l’édition</button>}
+            }}>Fermer l’édition</button>
         </div>
-        {saved?.completed && !canCompact && <p id={`${id}-close-hint`} className="record-hint">
-          {needsCorrection ? 'Corrigez l’ancien résultat avant de refermer.' : 'Enregistrez la correction ou rétablissez les valeurs enregistrées avant de refermer.'}
+        {!canCompact && <p id={`${id}-close-hint`} className="record-hint">
+          {needsCorrection ? 'Corrigez l’ancien résultat avant de refermer.' : saved?.completed
+            ? 'Enregistrez la correction ou rétablissez les valeurs enregistrées avant de refermer.'
+            : 'Les saisies partielles ou à corriger restent ouvertes jusqu’à leur confirmation.'}
         </p>}
         {error ? (
           <div className="workout-notes-error">
@@ -198,6 +237,7 @@ export default function WorkoutExecution({ initialWorkout, active, editable, onS
   // Les notes ne doivent jamais remplacer la structure d'un suivi ouvert.
   // Seules nos écritures validées actualisent cette vue ; les conflits gardent la saisie.
   const [workout, setWorkout] = useState(initialWorkout)
+  const [selectedSetId, setSelectedSetId] = useState(() => nextUnstartedSetId(initialWorkout))
   const [completing, setCompleting] = useState(false)
   const [completionError, setCompletionError] = useState<string | null>(null)
   const pendingSets = useRef(new Set<string>())
@@ -223,15 +263,18 @@ export default function WorkoutExecution({ initialWorkout, active, editable, onS
         <section className="workout-details" aria-label="Progression de la séance">
           <p className="workout-execution-progress">{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total}</p>
           <progress max={progress.total} value={progress.completed} aria-label={`${progress.completed} séries réalisées sur ${progress.total}`} />
-          <p className="record-hint">Saisie valide sauvegardée automatiquement dans ce navigateur. Confirmez chaque série pour la compter comme réalisée.</p>
+          <p id="workout-execution-hint" className="record-hint">Saisie valide sauvegardée automatiquement dans ce navigateur. Confirmez uniquement les séries réellement effectuées.</p>
           <button className="record-button" type="button" onClick={onNotes}>Notes de séance</button>
         </section>
         {workout.exercises.map((block, index) => (
           <section className="workout-exercise" key={block.id} aria-labelledby={`tracking-${block.id}`}>
             <h2 id={`tracking-${block.id}`}>{index + 1}. {exercises.find((item) => item.id === block.exerciseId)?.name}</h2>
             {block.sets.map((set, number) => <ExecutionSet key={set.id} workout={workout} blockId={block.id} set={set}
-              number={number + 1} onSaved={(result) => {
-                setWorkout(result.workouts.find((item) => item.id === workout.id)!)
+              number={number + 1} selected={selectedSetId === set.id} onSelect={setSelectedSetId} onSaved={(result, newlyConfirmed) => {
+                const updated = result.workouts.find((item) => item.id === workout.id)!
+                setWorkout(updated)
+                if (newlyConfirmed) setSelectedSetId((current) => current === null || current === set.id
+                  ? nextUnstartedSetId(updated, set.id) : current)
                 onSaved(result)
               }} onPendingChange={handlePendingChange} />)}
           </section>

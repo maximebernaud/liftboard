@@ -9,6 +9,10 @@ import { join } from 'node:path'
 
 const baseUrl = process.argv[2] ?? 'http://127.0.0.1:5173'
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(baseUrl).hostname), 'Utiliser uniquement un serveur local de test')
+const baselineUrl = process.argv.slice(3).find(argument => argument.startsWith('http:') || argument.startsWith('https:'))
+if (baselineUrl) assert.ok(['localhost', '127.0.0.1'].includes(new URL(baselineUrl).hostname), 'La référence doit aussi être servie localement')
+// Diagnostic ciblé facultatif ; la recette sans ce drapeau conserve tous les parcours.
+const onlyLot2 = process.argv.includes('--lot2-only')
 const chromePath = process.env.LIFTBOARD_TEST_CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const artifactDirectory = await mkdtemp(join(tmpdir(), 'liftboard-j7-test-'))
 console.log(`Profil et fichiers de test isolés : ${artifactDirectory}`)
@@ -23,6 +27,7 @@ let nextId = 0
 const pending = new Map()
 const browserErrors = []
 let passed = 0
+let skipped = 0
 let acceptBeforeUnload = false
 let beforeUnloadPrompts = 0
 let fileChooserPrompts = 0
@@ -46,6 +51,8 @@ const call = (fn, ...args) => evaluate(`(${fn.toString()})(${args.map((value) =>
 const settle = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
 
 async function click(text, scope = 'body') {
+  // Conserver les parcours de confirmation manuelle lorsque leur série est repliée.
+  if (text === 'Série réalisée') await openExecutionSet(scope)
   const found = await call((text, scope) => {
     const element = [...document.querySelector(scope).querySelectorAll('button, summary')]
       .find((item) => item.getClientRects().length && item.textContent.trim() === text)
@@ -57,13 +64,22 @@ async function click(text, scope = 'body') {
   await settle()
 }
 
-// Les anciens parcours de correction doivent désormais ouvrir explicitement la série.
+async function openExecutionSet(scope) {
+  const label = await call(scope => {
+    const form = document.querySelector(scope)
+    return form?.matches('.workout-execution-set-compact')
+      ? form.querySelector('.workout-execution-toggle').textContent.trim() : null
+  }, scope)
+  if (label) await click(label, scope)
+}
+
+// Ouvrir via Ajuster ou Modifier avant de saisir dans une série repliée.
 async function revealExecutionField(selector) {
   const formId = await call(selector => {
     const form = document.querySelector(selector)?.closest('.workout-execution-set-compact')
     return form?.id ?? null
   }, selector)
-  if (formId) await click('Modifier', `#${formId}`)
+  if (formId) await openExecutionSet(`#${formId}`)
 }
 
 async function enter(selector, text) {
@@ -123,6 +139,7 @@ const storedWorkouts = () => evaluate('JSON.parse(localStorage.getItem("liftboar
 const guardActive = () => evaluate('!window.dispatchEvent(new Event("beforeunload", { cancelable: true }))')
 
 async function check(label, action) {
+  if (onlyLot2 && !label.startsWith('UX V2 lot 2')) { skipped++; return }
   try { await action() } catch (error) {
     console.error(`${passed} parcours réussis, 1 échoué ; arrêt sur : ${label}`)
     throw error
@@ -1533,7 +1550,8 @@ try {
     assert.equal((await compactState()).compact, true)
     assert.match((await compactState()).planned, /charge non renseignée/)
     assert.equal((await compactState()).result, '77,5 kg × 2 rép.')
-    assert.equal(await call(scope => document.querySelector(scope).querySelector('.workout-execution-result strong')?.textContent ?? null, executionScope(4)), null)
+    assert.equal(await call(scope => document.querySelector(scope).querySelector('.workout-execution-completed'), executionScope(4)), null)
+    assert.equal(await executionAt(4), undefined)
   })
 
   await check('UX V2 lot 1 : cinq largeurs, compacité, texte agrandi et reflow à 200 %', async () => {
@@ -3138,8 +3156,492 @@ try {
     assert.match(await evaluate('document.querySelector("form > .record-error").textContent'), /bloquées/)
   })
 
+  const lot2Records = ['snatch', 'clean-and-jerk', 'front-squat', 'back-squat'].map(exerciseId => ({ exerciseId, oneRepMaxKg: 100 }))
+  const lot2Source = {
+    id: 'lot2-workout', title: 'Recette fictive V2-2 - 25 series', date: '2026-11-13', status: 'planned',
+    notes: { before: '', during: '', after: '' },
+    exercises: ['snatch', 'clean-and-jerk', 'front-squat', 'back-squat', 'snatch'].map((exerciseId, block) => ({
+      id: `lot2-block-${block}`, exerciseId,
+      sets: Array.from({ length: 5 }, (_, index) => ({
+        id: `lot2-set-${block}-${index}`, reps: index === 4 ? 1 : 2, intensityPct: 70 + index * 5,
+        rounding: { mode: 'exact' }, load: { exactKg: 70 + index * 5, selectedKg: 70 + index * 5 },
+      })),
+    })),
+  }
+  const lot2Scope = (block = 0, index = 0) => `#execution-lot2-set-${block}-${index}-form`
+  const lot2Field = (field, block = 0, index = 0) => `#execution-lot2-set-${block}-${index}-${field}`
+  const lot2At = async (block = 0, index = 0) => (await storedWorkouts())[0].exercises[block].sets[index].execution
+  const lot2State = (block = 0, index = 0) => call(scope => {
+    const form = document.querySelector(scope)
+    const close = form.querySelector('.workout-execution-close')
+    return {
+      compact: form.classList.contains('workout-execution-set-compact'),
+      status: form.querySelector('.workout-status').textContent,
+      visibleInputs: [...form.querySelectorAll('input')].filter(input => input.getClientRects().length).length,
+      direct: Boolean(form.querySelector('.workout-execution-confirm-planned')),
+      closeDisabled: close.disabled,
+      result: form.querySelector('.workout-execution-result')?.textContent,
+      activeId: document.activeElement.id,
+    }
+  }, lot2Scope(block, index))
+  async function setupLot2(source = lot2Source) {
+    await call((source, records) => {
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source]))
+      localStorage.setItem('liftboard.personal-records.v1', JSON.stringify(records))
+      sessionStorage.setItem('liftboard.navigation.v1', JSON.stringify({ section: 'sessions', trackingWorkoutId: source.id }))
+    }, source, lot2Records)
+    await reload(true)
+    await viewport(412, 'lot2-setup')
+  }
+
+  await check('UX V2 lot 2 : première série éditable, 24 aperçus exacts et aucune confirmation implicite', async () => {
+    await setupLot2()
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State()).compact, false)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set-compact").length'), 24)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-confirm-planned").length'), 24)
+    for (let block = 0; block < 5; block++) for (let index = 0; index < 5; index++) {
+      if (block === 0 && index === 0) continue
+      const state = await lot2State(block, index)
+      assert.equal(state.compact, true)
+      assert.equal(state.visibleInputs, 0)
+      assert.equal(state.status, 'À réaliser')
+      assert.match(state.result, new RegExp(`${70 + index * 5} kg.*${index === 4 ? 1 : 2} rép\\..*${70 + index * 5} % du 1RM`))
+    }
+    assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('reps')), '')
+    assert.equal(await call(selector => document.querySelector(selector).placeholder, lot2Field('reps')), '2')
+    assert.equal(await evaluate('document.activeElement.tagName'), 'H1', 'L’ouverture du suivi ne déclenche pas le clavier numérique')
+    assert.deepEqual(await storedWorkouts(), [lot2Source])
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('UX V2 lot 2 : Ajuster et Fermer sans écriture, mêmes champs et tabulation hors champs masqués', async () => {
+    await setupLot2()
+    await call(selector => { window.lot2Input = document.querySelector(selector) }, lot2Field('loadKg'))
+    await click('Fermer l’édition', lot2Scope())
+    assert.equal((await lot2State()).compact, true)
+    await call(scope => {
+      const form = document.querySelector(scope)
+      window.lot2Submits = 0
+      form.addEventListener('submit', () => window.lot2Submits++)
+      form.querySelector('.workout-execution-toggle').focus()
+    }, lot2Scope())
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal(await evaluate('document.activeElement.id'), 'execution-lot2-set-0-0-reps')
+    assert.equal(await call(selector => document.querySelector(selector) === window.lot2Input, lot2Field('loadKg')), true)
+    await click('Fermer l’édition', lot2Scope())
+    assert.equal((await lot2State()).compact, true)
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Ajuster')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Confirmer tel que prévu')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Ajuster')
+    assert.equal(await evaluate('window.lot2Submits'), 0)
+    assert.deepEqual(await storedWorkouts(), [lot2Source])
+  })
+
+  await check('UX V2 lot 2 : confirmation directe en un clic, prochain éditeur sans déplacement du focus', async () => {
+    await setupLot2()
+    await click('Fermer l’édition', lot2Scope())
+    await click('Confirmer tel que prévu', lot2Scope())
+    assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 70 })
+    assert.equal((await lot2State()).status, '✓ Réalisée')
+    assert.equal((await lot2State()).compact, true)
+    assert.equal((await lot2State()).result, '70 kg × 2 rép.')
+    assert.equal((await lot2State(0, 1)).visibleInputs, 2)
+    assert.equal(await call(scope => document.activeElement === document.querySelector(scope).querySelector('.workout-execution-toggle'), lot2Scope()), true)
+    assert.equal(await lot2At(0, 1), undefined)
+    assert.equal((await storedWorkouts())[0].status, 'planned')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 25')
+  })
+
+  await check('UX V2 lot 2 : deux saisies partielles sauvegardées restent ouvertes après sélection et actualisation', async () => {
+    await setupLot2()
+    await enter(lot2Field('reps'), '3')
+    assert.deepEqual(await lot2At(), { completed: false, reps: 3, loadKg: null })
+    assert.equal((await lot2State()).direct, false)
+    assert.equal((await lot2State()).closeDisabled, true)
+    await click('Fermer l’édition', lot2Scope())
+    assert.equal((await lot2State()).visibleInputs, 2)
+    await click('Ajuster', lot2Scope(0, 2))
+    assert.equal((await lot2State()).visibleInputs, 2)
+    await enter(lot2Field('loadKg', 0, 2), '77,5')
+    assert.deepEqual(await lot2At(0, 2), { completed: false, reps: null, loadKg: 77.5 })
+    assert.equal(await guardActive(), false)
+    await reload()
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State(0, 2)).visibleInputs, 2)
+    assert.equal((await lot2State(0, 1)).compact, true)
+    assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('reps')), '3')
+    assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('loadKg', 0, 2)), '77,5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 25')
+    await click('Série réalisée', lot2Scope())
+    assert.equal((await lot2State(0, 2)).visibleInputs, 2)
+    assert.equal((await lot2State(0, 1)).compact, true)
+  })
+
+  await check('UX V2 lot 2 : effacement volontaire durable, aucune reprise implicite du prévu', async () => {
+    await setupLot2()
+    await enter(lot2Field('loadKg'), '72,5')
+    await enter(lot2Field('loadKg'), '')
+    assert.deepEqual(await lot2At(), { completed: false, reps: null, loadKg: null, cleared: { loadKg: true } })
+    await reload()
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State()).direct, false)
+    assert.equal(await call(selector => document.querySelector(selector).getAttribute('placeholder'), lot2Field('loadKg')), null)
+    await click('Série réalisée', lot2Scope())
+    assert.equal(await call(selector => document.querySelector(selector).getAttribute('aria-invalid'), lot2Field('loadKg')), 'true')
+    assert.equal((await lot2At()).completed, false)
+    await enter(lot2Field('loadKg'), '69,6')
+    await click('Série réalisée', lot2Scope())
+    assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 69.6 })
+    assert.equal((await lot2State()).result, '69,6 kg × 2 rép.')
+    assert.deepEqual((await storedWorkouts())[0].exercises[0].sets[0].load, { exactKg: 70, selectedKg: 70 })
+  })
+
+  for (const missing of [true, false]) {
+    await check(`UX V2 lot 2 : charge ${missing ? 'absente' : 'arrondie à zéro'}, confirmation directe indisponible`, async () => {
+      const source = structuredClone(lot2Source)
+      source.exercises[0].sets[0] = {
+        ...source.exercises[0].sets[0], intensityPct: 1,
+        rounding: missing ? { mode: 'exact' } : { mode: 'down', increment: 5 },
+        load: missing ? null : { exactKg: 1, selectedKg: 0 },
+      }
+      await setupLot2(source)
+      await click('Fermer l’édition', lot2Scope())
+      assert.equal((await lot2State()).direct, false)
+      assert.equal((await lot2State()).compact, true)
+      assert.match(await call(scope => document.querySelector(scope).querySelector('.workout-execution-compact-summary').textContent, lot2Scope()), missing ? /Charge prévue non renseignée/ : /Charge prévue à vérifier/)
+      await click('Ajuster', lot2Scope())
+      await enter(lot2Field('loadKg'), '20')
+      await click('Série réalisée', lot2Scope())
+      assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 20 })
+      assert.deepEqual((await storedWorkouts())[0].exercises[0].sets[0].load, source.exercises[0].sets[0].load)
+    })
+  }
+
+  for (const failure of ['quota', 'denied']) {
+    await check(`UX V2 lot 2 : confirmation directe en échec (${failure}), édition et nouvelle tentative conservées`, async () => {
+      await setupLot2()
+      await click('Fermer l’édition', lot2Scope())
+      await call(failure => {
+        window.lot2OriginalSetItem = Storage.prototype.setItem
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'liftboard.workouts.v1') throw new DOMException('Test lot 2', failure === 'quota' ? 'QuotaExceededError' : 'SecurityError')
+          return window.lot2OriginalSetItem.call(this, key, value)
+        }
+      }, failure)
+      await click('Confirmer tel que prévu', lot2Scope())
+      assert.equal((await lot2State()).visibleInputs, 2)
+      assert.equal((await lot2State()).closeDisabled, true)
+      assert.equal((await lot2State()).direct, false)
+      assert.equal(await lot2At(), undefined)
+      assert.equal(await guardActive(), true)
+      assert.match(await call(scope => document.querySelector(scope).querySelector('[role="alert"]').textContent, lot2Scope()), failure === 'quota' ? /plein/ : /Impossible/)
+      await click('Notes de séance')
+      await click('← Retour au suivi')
+      assert.equal((await lot2State()).visibleInputs, 2)
+      await evaluate('Storage.prototype.setItem = window.lot2OriginalSetItem')
+      await click('Réessayer', lot2Scope())
+      assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 70 })
+      assert.equal((await lot2State()).compact, true)
+      assert.equal((await lot2State(0, 1)).visibleInputs, 2)
+      assert.equal(await guardActive(), false)
+    })
+  }
+
+  await check('UX V2 lot 2 : conflit de confirmation directe, résultat concurrent et tentative préservés', async () => {
+    await setupLot2()
+    await click('Fermer l’édition', lot2Scope())
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].exercises[0].sets[0].execution = { completed: false, reps: 1, loadKg: 65 }
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    await click('Confirmer tel que prévu', lot2Scope())
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State()).closeDisabled, true)
+    assert.match(await call(scope => document.querySelector(scope).querySelector('[role="alert"]').textContent, lot2Scope()), /ont changé ailleurs/)
+    assert.deepEqual(await lot2At(), { completed: false, reps: 1, loadKg: 65 })
+    await click('Retour aux séances')
+    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Ouvrir', '.workout-session-list')
+    await click('Reprendre le suivi')
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('loadKg')), '65')
+    assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('reps')), '1')
+  })
+
+  await check('UX V2 lot 2 : saisie invalide et identité des champs protégées entre notes, sections et clôture', async () => {
+    await setupLot2()
+    await enter(lot2Field('loadKg'), '77,')
+    await call(selector => { window.lot2InvalidInput = document.querySelector(selector) }, lot2Field('loadKg'))
+    await click('Ajuster', lot2Scope(0, 2))
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State()).direct, false)
+    await click('Notes de séance')
+    await click('← Retour au suivi')
+    await click('Records', '.primary-nav')
+    await click('Séances', '.primary-nav')
+    await click('Continuer ma saisie', 'dialog[open]')
+    assert.equal(await call(selector => document.querySelector(selector) === window.lot2InvalidInput && window.lot2InvalidInput.value === '77,', lot2Field('loadKg')), true)
+    await click('Fermer l’édition', lot2Scope())
+    assert.equal((await lot2State()).visibleInputs, 2)
+    await click('Terminer la séance')
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await guardActive(), true)
+    assert.deepEqual(await storedWorkouts(), [lot2Source])
+    await enter(lot2Field('loadKg'), '77,5')
+    assert.deepEqual(await lot2At(), { completed: false, reps: null, loadKg: 77.5 })
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('UX V2 lot 2 : ancien résultat à corriger, résultat partiel et édition du lot 1 restent accessibles', async () => {
+    const source = structuredClone(lot2Source)
+    source.exercises[0].sets[0].execution = { completed: true, reps: 0, loadKg: 0 }
+    source.exercises[0].sets[1].execution = { completed: false, reps: 1, loadKg: null }
+    source.exercises[0].sets[2].execution = { completed: true, reps: 2, loadKg: 80 }
+    await setupLot2(source)
+    assert.equal((await lot2State()).status, 'À corriger')
+    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State(0, 1)).visibleInputs, 2)
+    assert.equal((await lot2State(0, 2)).compact, true)
+    assert.equal((await lot2State(0, 3)).compact, true)
+    await enter(lot2Field('reps'), '2')
+    await enter(lot2Field('loadKg'), '72,5')
+    await click('Enregistrer la correction', lot2Scope())
+    assert.equal((await lot2State()).compact, true)
+    assert.equal((await lot2State(0, 1)).visibleInputs, 2)
+    await click('Modifier', lot2Scope(0, 2))
+    await enter(lot2Field('loadKg', 0, 2), '75')
+    assert.equal((await lot2State(0, 2)).closeDisabled, true)
+    await click('Rétablir les valeurs enregistrées', lot2Scope(0, 2))
+    await click('Fermer l’édition', lot2Scope(0, 2))
+    assert.deepEqual(await lot2At(0, 2), { completed: true, reps: 2, loadKg: 80 })
+  })
+
+  await check('UX V2 lot 2 : progression entre exercices par identifiants, sans clavier ni retour en haut', async () => {
+    await setupLot2()
+    await click('Ajuster', lot2Scope(0, 4))
+    assert.equal((await lot2State()).compact, true)
+    await call(scope => document.querySelector(scope).querySelector('[type="submit"]').scrollIntoView({ block: 'end' }), lot2Scope(0, 4))
+    await click('Série réalisée', lot2Scope(0, 4))
+    assert.equal((await lot2State(1, 0)).visibleInputs, 2)
+    assert.equal((await lot2State(0, 1)).compact, true)
+    assert.equal(await lot2At(1, 0), undefined)
+    assert.equal(await call(scope => document.activeElement === document.querySelector(scope).querySelector('.workout-execution-toggle'), lot2Scope(0, 4)), true)
+    assert.ok(await evaluate('scrollY > 0'))
+    assert.equal(await call(() => {
+      const box = document.activeElement.getBoundingClientRect()
+      return box.top >= 0 && box.bottom <= document.querySelector('.primary-nav').getBoundingClientRect().top
+    }), true)
+  })
+
+  async function measureLot2(label, reference) {
+    await setupLot2()
+    await evaluate('document.fonts.ready.then(() => true)')
+    const sizes = []
+    const readLayout = () => call(() => {
+      const nav = document.querySelector('.primary-nav').getBoundingClientRect()
+      const bottom = getComputedStyle(document.querySelector('.primary-nav')).position === 'fixed' ? nav.top : innerHeight
+      const fullyVisible = element => {
+        if (!element?.getClientRects().length) return false
+        const box = element.getBoundingClientRect()
+        return box.top >= 0 && box.bottom <= bottom
+      }
+      const forms = [...document.querySelectorAll('.workout-execution-set')]
+      return { width: innerWidth, trackingHeight: document.querySelector('.workout-execution-content').getBoundingClientRect().height,
+        documentHeight: document.documentElement.scrollHeight, fullyVisibleSets: forms.filter(fullyVisible).length,
+        visiblePrescriptions: forms.filter(form => fullyVisible(form.querySelector(form.classList.contains('workout-execution-set-unstarted')
+          ? '.workout-execution-result' : '.workout-execution-planned'))).length }
+    })
+    for (const width of [320, 375, 412, 768, 1440]) {
+      await viewport(width, `lot2-${label}`)
+      await evaluate('document.activeElement.blur(); window.scrollTo(0, 0)')
+      await settle()
+      const initial = await readLayout()
+      await viewport(width, `lot2-${label}-initial`, true)
+      await call(() => document.querySelector('.workout-exercise').scrollIntoView({ block: 'start' }))
+      await viewport(width, `lot2-${label}-sets`, true)
+      const atExercises = await readLayout()
+      sizes.push({ ...initial, fullyVisibleSetsAtExercises: atExercises.fullyVisibleSets, visiblePrescriptionsAtExercises: atExercises.visiblePrescriptions })
+    }
+    await viewport(412, `lot2-${label}-gestures`)
+    await call(() => {
+      window.lot2Clicks = []
+      document.addEventListener('click', event => {
+        const target = event.target.closest('button, input')
+        if (target?.closest('.workout-execution-set')) window.lot2Clicks.push(target.tagName === 'INPUT' ? target.id : target.textContent.trim())
+      }, true)
+    })
+    await click(reference ? 'Série réalisée' : 'Confirmer tel que prévu', lot2Scope(0, 2))
+    const conformingClicks = await evaluate('window.lot2Clicks.length')
+    assert.equal(conformingClicks, 1)
+    await evaluate('window.lot2Clicks = []')
+    await call(selector => { const input = document.querySelector(selector); input.focus(); input.click() }, lot2Field('loadKg'))
+    await enter(lot2Field('loadKg'), '77,5')
+    assert.deepEqual(await lot2At(), { completed: false, reps: null, loadKg: 77.5 })
+    await click('Série réalisée', lot2Scope())
+    const adjustedActiveClicks = await evaluate('window.lot2Clicks.length')
+    assert.equal(adjustedActiveClicks, 2)
+    return { label, sizes, conformingClicks, adjustedActiveClicks }
+  }
+
+  await check('UX V2 lot 2 : mesures sur 5 exercices et 25 séries, rendu et actions courantes', async () => {
+    let before = null
+    if (baselineUrl) {
+      const baselineTarget = await (await fetch(`${debugOrigin}/json/new?${encodeURIComponent(baselineUrl)}`, { method: 'PUT' })).json()
+      const baseline = await connectTarget(baselineTarget.webSocketDebuggerUrl)
+      await command('Page.enable', {}, baseline)
+      await command('Runtime.enable', {}, baseline)
+      try {
+        before = await inTab(baseline, async () => { await waitForApp(); return measureLot2('before-8b28aef', true) })
+      } finally {
+        await command('Target.closeTarget', { targetId: baselineTarget.id })
+        baseline.close()
+      }
+    }
+    const after = await measureLot2('after', false)
+    if (before) for (const result of after.sizes) {
+      const original = before.sizes.find(size => size.width === result.width)
+      assert.ok(result.trackingHeight < original.trackingHeight * 0.65, `Réduction de défilement insuffisante à ${result.width}px`)
+    }
+    await writeFile(join(artifactDirectory, 'lot2-25-sets-metrics.json'), JSON.stringify({ before, after }, null, 2))
+    console.log(`Mesures V2-2 : ${JSON.stringify({ before, after })}`)
+    if (!before) console.log('Référence avant non mesurée : fournir un second serveur local contenant le build 8b28aef.')
+    await setupLot2()
+    await call(() => {
+      const root = getComputedStyle(document.documentElement)
+      const style = document.createElement('style')
+      style.id = 'lot2-text-zoom'
+      const tokens = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl'].flatMap(size => [`--lb-text-${size}`, `--lb-leading-${size}`])
+      style.textContent = ':root {' + tokens.map(token => `${token}: ${parseFloat(root.getPropertyValue(token)) * 2}px !important;`).join('') + '}'
+      document.head.append(style)
+    })
+    await viewport(320, 'lot2-text-200', true)
+    await click('Ajuster', lot2Scope(0, 1))
+    await viewport(320, 'lot2-editor-text-200', true)
+    await click('Fermer l’édition', lot2Scope(0, 1))
+    await evaluate('document.getElementById("lot2-text-zoom").remove()')
+    await command('Emulation.setDeviceMetricsOverride', { width: 720, height: 422, deviceScaleFactor: 2, mobile: false })
+    await settle()
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true)
+    assert.deepEqual(await storedWorkouts(), [lot2Source])
+  })
+
+  await check('UX V2 lot 2 : audit accessibilité, texte à 200 %, mots lisibles et focus aux cinq largeurs', async () => {
+    const observations = []
+    const issues = []
+    const key = async (name, code) => {
+      await command('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: code, ...(name === 'Enter' ? { text: '\r' } : {}) })
+      await command('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: code })
+      await settle()
+    }
+    const inspect = scope => call(scope => {
+      const form = document.querySelector(scope)
+      const box = form.getBoundingClientRect()
+      const brokenWords = []
+      const clipped = []
+      for (const element of form.querySelectorAll('h3, .workout-status, .workout-execution-result, label, button')) {
+        if (!element.getClientRects().length) continue
+        if (element.scrollWidth > element.clientWidth + 1) clipped.push(element.textContent.trim())
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+        while (walker.nextNode()) {
+          const node = walker.currentNode
+          for (const match of node.textContent.matchAll(/\S+/g)) {
+            const range = document.createRange()
+            range.setStart(node, match.index)
+            range.setEnd(node, match.index + match[0].length)
+            const rects = [...range.getClientRects()]
+            if (new Set(rects.map(rect => Math.round(rect.top))).size > 1) brokenWords.push(match[0])
+            if (rects.some(rect => rect.left < box.left - 1 || rect.right > box.right + 1)) clipped.push(match[0])
+          }
+        }
+      }
+      const controls = [...form.querySelectorAll('button, input')].filter(element => element.getClientRects().length)
+      const targets = controls.map(element => {
+        const rect = element.getBoundingClientRect()
+        return { text: element.textContent.trim() || element.id, width: rect.width, height: rect.height, font: parseFloat(getComputedStyle(element).fontSize) }
+      })
+      const actions = [...form.querySelectorAll('.workout-execution-planned-actions button')].map(element => element.getBoundingClientRect())
+      const overlap = actions.length === 2 && Math.min(actions[0].right, actions[1].right) > Math.max(actions[0].left, actions[1].left) &&
+        Math.min(actions[0].bottom, actions[1].bottom) > Math.max(actions[0].top, actions[1].top)
+      return { brokenWords, clipped, targets, overlap, horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+        fieldColumns: getComputedStyle(form.querySelector('.workout-set-fields')).gridTemplateColumns }
+    }, scope)
+    const captureSet = async (scope, name) => {
+      const clip = await call(scope => {
+        const box = document.querySelector(scope).getBoundingClientRect()
+        return { x: box.left + scrollX, y: box.top + scrollY, width: box.width, height: box.height, scale: 1 }
+      }, scope)
+      const screenshot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip })
+      await writeFile(join(artifactDirectory, `${name}.png`), Buffer.from(screenshot.data, 'base64'))
+    }
+    const focusState = () => call(() => {
+      const element = document.activeElement
+      const box = element.getBoundingClientRect()
+      const nav = document.querySelector('.primary-nav')
+      const bottom = getComputedStyle(nav).position === 'fixed' ? nav.getBoundingClientRect().top : innerHeight
+      return { id: element.id, top: box.top, bottom: box.bottom, availableBottom: bottom,
+        visible: box.top >= 0 && box.bottom <= bottom, outline: getComputedStyle(element).outlineStyle,
+        outlineWidth: parseFloat(getComputedStyle(element).outlineWidth) }
+    })
+    for (const width of [320, 375, 412, 768, 1440]) for (const scale of [1, 2]) {
+      await setupLot2()
+      await evaluate('document.fonts.ready.then(() => true)')
+      if (scale === 2) await call(() => {
+        // Agrandissement des seuls tokens typographiques, sans zoom ni changement de viewport.
+        const root = getComputedStyle(document.documentElement)
+        const style = document.createElement('style')
+        const tokens = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl'].flatMap(size => [`--lb-text-${size}`, `--lb-leading-${size}`])
+        style.textContent = ':root {' + tokens.map(token => `${token}: ${parseFloat(root.getPropertyValue(token)) * 2}px !important;`).join('') + '}'
+        document.head.append(style)
+      })
+      await viewport(width, 'a11y')
+      await click('Fermer l’édition', lot2Scope())
+      await call(scope => document.querySelector(scope).querySelector('h3').focus(), lot2Scope())
+      await key('Tab', 9)
+      assert.equal(await evaluate('document.activeElement.textContent'), 'Ajuster')
+      const adjustFocus = await focusState()
+      await key('Tab', 9)
+      assert.equal(await evaluate('document.activeElement.textContent'), 'Confirmer tel que prévu')
+      const confirmFocus = await focusState()
+      const compact = await inspect(lot2Scope())
+      await captureSet(lot2Scope(), `a11y-text-${scale * 100}-compact-${width}`)
+      await call(scope => document.querySelector(scope).querySelector('h3').focus(), lot2Scope())
+      await key('Tab', 9)
+      await key('Enter', 13)
+      assert.equal(await evaluate('document.activeElement.id'), 'execution-lot2-set-0-0-reps')
+      const repsFocus = await focusState()
+      await key('Tab', 9)
+      assert.equal(await evaluate('document.activeElement.id'), 'execution-lot2-set-0-0-loadKg')
+      const loadFocus = await focusState()
+      const open = await inspect(lot2Scope())
+      await viewport(width, `a11y-text-${scale * 100}-focus`, true)
+      await captureSet(lot2Scope(), `a11y-text-${scale * 100}-open-${width}`)
+      const focus = { adjustFocus, confirmFocus, repsFocus, loadFocus }
+      observations.push({ width, scale, compact, open, focus })
+      for (const [mode, result] of Object.entries({ compact, open })) {
+        if (result.brokenWords.length || result.clipped.length || result.overlap || result.horizontalOverflow ||
+          result.targets.some(target => target.width < 44 || target.height < 44)) issues.push({ width, scale, mode, result })
+      }
+      if (Object.values(focus).some(state => !state.visible || state.outline === 'none' || state.outlineWidth < 2)) issues.push({ width, scale, focus })
+      assert.deepEqual(await storedWorkouts(), [lot2Source], 'Audit sans modification des performances')
+    }
+    await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    assert.equal(await evaluate('getComputedStyle(document.querySelector(".workout-execution-toggle")).transitionDuration'), '0s')
+    await command('Emulation.setEmulatedMedia', { features: [] })
+    await writeFile(join(artifactDirectory, 'lot2-a11y-audit.json'), JSON.stringify({ method: 'Tokens de police et interligne doubles, viewport CSS constant ; aucun zoom navigateur natif.', observations, issues }, null, 2))
+    assert.deepEqual(issues, [], 'Aucun mot coupé, texte tronqué, cible trop petite ou focus masqué dans les séries')
+  })
+
   assert.deepEqual(browserErrors, [], 'Aucune exception JavaScript dans le navigateur')
-  console.log(`${passed} parcours navigateur réussis, 0 échoué. Captures et profil isolé : ${artifactDirectory}`)
+  console.log(`${passed} parcours navigateur réussis, 0 échoué.${onlyLot2 ? ` Mode ciblé : ${skipped} autres parcours non exécutés.` : ''} Captures et profil isolé : ${artifactDirectory}`)
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {
     await command('Browser.close').catch(() => {})

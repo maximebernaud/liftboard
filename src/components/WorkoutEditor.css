@@ -373,6 +373,40 @@
   line-height: var(--lb-leading-sm);
 }
 
+.workout-execution-result > .workout-execution-intensity {
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+}
+
+.workout-execution-planned-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: var(--lb-space-2);
+}
+
+.workout-execution-set-unstarted .workout-execution-toggle {
+  padding-inline: var(--lb-space-2);
+}
+
+.record-button.workout-execution-confirm-planned {
+  flex: 1 1 10rem;
+  min-height: var(--lb-touch-min);
+  padding: var(--lb-space-2);
+  border-color: transparent;
+  color: var(--lb-color-accent);
+  background: transparent;
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+.record-button.workout-execution-confirm-planned:hover,
+.record-button.workout-execution-confirm-planned:active {
+  background: var(--lb-color-raised);
+}
+
 .record-button.workout-execution-toggle,
 .record-button.workout-execution-close {
   min-height: var(--lb-touch-min);
@@ -432,8 +466,10 @@
 
 /* Lignes communes aux labels, saisies et erreurs, sans hauteur imposée. */
 .workout-execution-fields .workout-set-fields {
+  /* Le minimum suit le texte agrandi : une colonne si les mots ne tiennent plus. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(7 * var(--lb-text-sm))), 1fr));
   align-items: stretch;
-  row-gap: 0;
+  row-gap: var(--lb-space-3);
 }
 
 .workout-execution-fields .workout-field {
@@ -464,6 +500,13 @@
   margin: 0;
   padding: 0;
   border: 0;
+}
+
+@media (max-width: 959px) {
+  .workout-execution-content :is(input, button) {
+    /* La barre basse grandit quand ses libellés agrandis passent sur deux lignes. */
+    scroll-margin-block-end: calc(max(var(--lb-mobile-nav-height), calc(3 * var(--lb-leading-sm) + var(--lb-space-3))) + env(safe-area-inset-bottom, 0px) + var(--lb-space-4));
+  }
 }
 
 .record-button.workout-consult {

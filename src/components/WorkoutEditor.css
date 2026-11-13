@@ -297,6 +297,108 @@
   font-weight: 600;
 }
 
+.workout-execution-identity,
+.workout-execution-editor {
+  display: contents;
+}
+
+.workout-execution-editor[hidden] {
+  display: none;
+}
+
+.workout-execution-set-compact {
+  gap: var(--lb-space-1);
+  padding: 0 0 var(--lb-space-4);
+  border: 0;
+  border-bottom: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.workout-execution-set-compact:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.workout-execution-set-compact .workout-execution-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lb-space-2);
+  min-width: 0;
+}
+
+.workout-execution-set-compact h3 {
+  color: var(--lb-color-text-muted);
+}
+
+.workout-execution-set-compact .workout-status {
+  padding: 0;
+  border: 0;
+}
+
+.workout-execution-compact-summary {
+  display: grid;
+  gap: var(--lb-space-1);
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.workout-execution-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--lb-space-2);
+}
+
+.workout-execution-result strong {
+  font-family: var(--lb-font-display);
+  font-size: var(--lb-text-2xl);
+  font-weight: 700;
+  line-height: var(--lb-leading-2xl);
+}
+
+.workout-execution-result strong span {
+  font-size: var(--lb-text-base);
+  font-weight: 600;
+}
+
+.workout-execution-result > span,
+.workout-execution-compact-planned {
+  color: var(--lb-color-text-muted);
+}
+
+.workout-execution-compact-planned {
+  font-size: var(--lb-text-sm);
+  line-height: var(--lb-leading-sm);
+}
+
+.record-button.workout-execution-toggle,
+.record-button.workout-execution-close {
+  min-height: var(--lb-touch-min);
+  padding: var(--lb-space-2) var(--lb-space-3);
+  border-color: transparent;
+  background: transparent;
+  font-size: var(--lb-text-sm);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+.record-button.workout-execution-toggle:hover,
+.record-button.workout-execution-close:hover:not(:disabled) {
+  background: var(--lb-color-raised);
+}
+
+.workout-form-actions > .workout-execution-close {
+  flex: 0 1 auto;
+}
+
+.workout-execution-close:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .workout-execution-planned {
   display: flex;
   flex-wrap: wrap;

@@ -12,6 +12,11 @@ import WorkoutConfirmation from './WorkoutConfirmation'
 
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 
+function focusExecutionControl(control: HTMLElement | null) {
+  control?.focus({ preventScroll: true })
+  control?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+}
+
 function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange }: {
   workout: Workout
   blockId: string
@@ -26,7 +31,10 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
   const [attempt, setAttempt] = useState<WorkoutSetExecution | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showRequired, setShowRequired] = useState(false)
+  const [editing, setEditing] = useState(false)
   const form = useRef<HTMLFormElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const editButton = useRef<HTMLButtonElement>(null)
   const saved = savedWorkout.exercises.find((block) => block.id === blockId)!.sets.find((item) => item.id === set.id)!.execution
   const parsed = { reps: parseExecutionReps(inputs.reps ?? ''), loadKg: parseExecutionLoad(inputs.loadKg ?? '') }
   const invalid = { reps: Boolean(inputs.reps?.trim()) && parsed.reps === null, loadKg: Boolean(inputs.loadKg?.trim()) && parsed.loadKg === null }
@@ -34,6 +42,9 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
   const pending = dirty || attempt !== null
   const needsCorrection = requiresExecutionCorrection(saved)
   const confirmation = confirmSetExecution(set, inputs)
+  const canCompact = Boolean(saved?.completed) && !pending && !error && !needsCorrection &&
+    !invalid.reps && !invalid.loadKg && !(showRequired && Object.keys(confirmation.errors).length > 0)
+  const compact = canCompact && !editing
   const id = `execution-${set.id}`
 
   useEffect(() => { onPendingChange(set.id, pending) }, [onPendingChange, pending, set.id])
@@ -51,6 +62,13 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
     if (fillInputs) {
       setInputs(executionInputs(execution))
       setShowRequired(false)
+      if (execution.completed) {
+        setEditing(false)
+        requestAnimationFrame(() => focusExecutionControl(editButton.current))
+      }
+    }
+    if (saved?.completed && !execution.completed) {
+      requestAnimationFrame(() => focusExecutionControl(heading.current))
     }
     onSaved(result)
   }
@@ -69,66 +87,99 @@ function ExecutionSet({ workout, blockId, set, number, onSaved, onPendingChange 
   }
 
   return (
-    <form ref={form} id={`${id}-form`} aria-labelledby={`${id}-title`} className="workout-execution-set" noValidate onSubmit={(event) => {
+    <form ref={form} id={`${id}-form`} aria-labelledby={`${id}-title`} className={`workout-execution-set${compact ? ' workout-execution-set-compact' : ''}`} noValidate onSubmit={(event) => {
       event.preventDefault()
+      if (compact) return
       setShowRequired(true)
       if (confirmation.execution) persist(confirmation.execution, true)
       else requestAnimationFrame(() => form.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus())
     }}>
       <div className="workout-block-heading">
-        <h3 id={`${id}-title`}>Série {number}</h3>
-        <span className={`workout-status${saved?.completed ? ' workout-execution-completed' : ''}`}>
-          {saved?.completed ? '✓ Réalisée' : saved ? 'Saisie en cours' : 'À réaliser'}{needsCorrection && ' · à corriger'}
-        </span>
-      </div>
-      <div className="workout-execution-planned">
-        <p className="workout-label">Prévu</p>
-        <p><strong>{set.reps} rép.</strong><span aria-hidden="true"> · </span>{executionNumberInput(set.intensityPct)} % du 1RM<span aria-hidden="true"> · </span><strong>{set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : '—'}</strong></p>
-      </div>
-      <fieldset className="workout-execution-fields">
-        <legend>Réalisé</legend>
-        <div className="workout-set-fields">
-          {(['reps', 'loadKg'] as const).map((field) => {
-            const fieldId = `${id}-${field}`
-            const fieldError = invalid[field] || showRequired ? confirmation.errors[field] : undefined
-            return (
-              <div className="workout-field" key={field}>
-                <label htmlFor={fieldId}>{field === 'reps' ? 'Répétitions effectuées' : 'Charge réellement soulevée (kg)'}</label>
-                <input id={fieldId} type="text" inputMode={field === 'reps' ? 'numeric' : 'decimal'}
-                  autoComplete="off" spellCheck={false} value={inputs[field] ?? ''}
-                  placeholder={inputs[field] === null ? executionNumberInput(field === 'reps' ? set.reps : set.load?.selectedKg) : undefined}
-                  aria-invalid={Boolean(fieldError)} aria-describedby={`${id}-hint${fieldError ? ` ${fieldId}-error` : ''}`}
-                  onChange={(event) => change(field, event.target.value)}
-                  onKeyDown={(event) => handleNumericArrow(event.nativeEvent,
-                    inputs[field] ?? executionNumberInput(field === 'reps' ? set.reps : set.load?.selectedKg),
-                    field === 'reps' ? 'execution-reps' : 'execution-load', (value) => change(field, value))} />
-                {fieldError && <p id={`${fieldId}-error`} className="record-error">{fieldError}</p>}
-              </div>
-            )
-          })}
+        <div className="workout-execution-identity">
+          <h3 id={`${id}-title`} ref={heading} tabIndex={-1}>Série {number}</h3>
+          <span className={`workout-status${needsCorrection ? ' record-error' : saved?.completed ? ' workout-execution-completed' : ''}`}>
+            {needsCorrection ? 'À corriger' : saved?.completed ? '✓ Réalisée' : saved ? 'Saisie en cours' : 'À réaliser'}
+          </span>
         </div>
-      </fieldset>
-      {needsCorrection && <p className="record-error">Ancien résultat à corriger : répétitions et charge doivent être strictement positives et dans les limites numériques sûres. Les valeurs enregistrées sont conservées.</p>}
-      <p id={`${id}-hint`} className="record-hint">Les champs laissés intacts reprennent le prévu à la confirmation. {set.load === null && 'Charge absente : renseignez les kg.'}</p>
-      {saved?.completed && <p className="record-hint">Enregistré : {executionNumberInput(saved.reps)} rép. à {executionNumberInput(saved.loadKg)} kg.</p>}
-      <div className="workout-form-actions">
-        {(!saved?.completed || pending || needsCorrection) && <button className="record-button record-button-primary" type="submit">
-          {saved?.completed ? 'Enregistrer la correction' : 'Série réalisée'}
-        </button>}
-        {saved?.completed && <button className="record-button" type="button" disabled={pending}
-          onClick={() => persist({ ...saved, completed: false })}>Annuler l’état réalisé</button>}
-        {saved?.completed && pending && <button className="record-button" type="button" onClick={() => {
-          setInputs(executionInputs(saved)); setAttempt(null); setError(null); setShowRequired(false)
-        }}>Rétablir les valeurs enregistrées</button>}
+        <button ref={editButton} className="record-button workout-execution-toggle" type="button" hidden={!compact}
+          aria-label={`Modifier la série ${number}`} aria-expanded={!compact} aria-controls={`${id}-editor`}
+          aria-describedby={compact ? `${id}-result ${id}-planned-summary` : undefined} onClick={() => {
+            setEditing(true)
+            requestAnimationFrame(() => focusExecutionControl(form.current?.querySelector<HTMLInputElement>('input') ?? null))
+          }}>Modifier</button>
       </div>
-      {error ? (
-        <div className="workout-notes-error">
-          <p className="record-error" role="alert">Non enregistré. {error}</p>
-          <button className="record-button" type="button" onClick={() => attempt && persist(attempt, attempt.completed)}>Réessayer</button>
+      {compact && saved?.completed && <div className="workout-execution-compact-summary">
+        <p id={`${id}-result`} className="workout-execution-result">
+          <strong>{executionNumberInput(saved.loadKg)} <span>kg</span></strong>{' '}
+          <span>× {executionNumberInput(saved.reps)} rép.</span>
+        </p>
+        <p id={`${id}-planned-summary`} className="workout-execution-compact-planned">
+          Prévu : {set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : 'charge non renseignée'}
+          {' · '}{set.reps} rép. · {executionNumberInput(set.intensityPct)} % du 1RM
+        </p>
+      </div>}
+      {/* Le formulaire reste monté : replier ne réinitialise ni saisie ni référence de conflit. */}
+      <div id={`${id}-editor`} className="workout-execution-editor" hidden={compact}>
+        <div className="workout-execution-planned">
+          <p className="workout-label">Prévu</p>
+          <p><strong>{set.reps} rép.</strong><span aria-hidden="true"> · </span>{executionNumberInput(set.intensityPct)} % du 1RM<span aria-hidden="true"> · </span><strong>{set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : '—'}</strong></p>
         </div>
-      ) : (
-        <p className="record-hint">{pending ? 'Non enregistré · saisie à corriger ou à confirmer.' : saved ? 'Enregistré localement.' : 'Aucun résultat enregistré.'}</p>
-      )}
+        <fieldset className="workout-execution-fields">
+          <legend>Réalisé</legend>
+          <div className="workout-set-fields">
+            {(['reps', 'loadKg'] as const).map((field) => {
+              const fieldId = `${id}-${field}`
+              const fieldError = invalid[field] || showRequired ? confirmation.errors[field] : undefined
+              return (
+                <div className="workout-field" key={field}>
+                  <label htmlFor={fieldId}>{field === 'reps' ? 'Répétitions effectuées' : 'Charge réellement soulevée (kg)'}</label>
+                  <input id={fieldId} type="text" inputMode={field === 'reps' ? 'numeric' : 'decimal'}
+                    autoComplete="off" spellCheck={false} value={inputs[field] ?? ''}
+                    placeholder={inputs[field] === null ? executionNumberInput(field === 'reps' ? set.reps : set.load?.selectedKg) : undefined}
+                    aria-invalid={Boolean(fieldError)} aria-describedby={`${id}-hint${fieldError ? ` ${fieldId}-error` : ''}`}
+                    onChange={(event) => change(field, event.target.value)}
+                    onKeyDown={(event) => handleNumericArrow(event.nativeEvent,
+                      inputs[field] ?? executionNumberInput(field === 'reps' ? set.reps : set.load?.selectedKg),
+                      field === 'reps' ? 'execution-reps' : 'execution-load', (value) => change(field, value))} />
+                  {fieldError && <p id={`${fieldId}-error`} className="record-error">{fieldError}</p>}
+                </div>
+              )
+            })}
+          </div>
+        </fieldset>
+        {needsCorrection && <p className="record-error">Ancien résultat à corriger : répétitions et charge doivent être strictement positives et dans les limites numériques sûres. Les valeurs enregistrées sont conservées.</p>}
+        <p id={`${id}-hint`} className="record-hint">Les champs laissés intacts reprennent le prévu à la confirmation. {set.load === null && 'Charge absente : renseignez les kg.'}</p>
+        {saved?.completed && <p className="record-hint">Enregistré : {executionNumberInput(saved.reps)} rép. à {executionNumberInput(saved.loadKg)} kg.</p>}
+        <div className="workout-form-actions">
+          {(!saved?.completed || pending || needsCorrection) && <button className="record-button record-button-primary" type="submit">
+            {saved?.completed ? 'Enregistrer la correction' : 'Série réalisée'}
+          </button>}
+          {saved?.completed && <button className="record-button" type="button" disabled={pending}
+            onClick={() => persist({ ...saved, completed: false })}>Annuler l’état réalisé</button>}
+          {saved?.completed && pending && <button className="record-button" type="button" onClick={() => {
+            setInputs(executionInputs(saved)); setAttempt(null); setError(null); setShowRequired(false)
+            requestAnimationFrame(() => focusExecutionControl(form.current?.querySelector<HTMLInputElement>('input') ?? null))
+          }}>Rétablir les valeurs enregistrées</button>}
+          {saved?.completed && <button className="record-button workout-execution-close" type="button" disabled={!canCompact}
+            aria-controls={`${id}-editor`} aria-expanded="true" aria-describedby={!canCompact ? `${id}-close-hint` : undefined}
+            onClick={() => {
+              if (!canCompact) return
+              setEditing(false)
+              requestAnimationFrame(() => focusExecutionControl(editButton.current))
+            }}>Fermer l’édition</button>}
+        </div>
+        {saved?.completed && !canCompact && <p id={`${id}-close-hint`} className="record-hint">
+          {needsCorrection ? 'Corrigez l’ancien résultat avant de refermer.' : 'Enregistrez la correction ou rétablissez les valeurs enregistrées avant de refermer.'}
+        </p>}
+        {error ? (
+          <div className="workout-notes-error">
+            <p className="record-error" role="alert">Non enregistré. {error}</p>
+            <button className="record-button" type="button" onClick={() => attempt && persist(attempt, attempt.completed)}>Réessayer</button>
+          </div>
+        ) : (
+          <p className="record-hint">{pending ? 'Non enregistré · saisie à corriger ou à confirmer.' : saved ? 'Enregistré localement.' : 'Aucun résultat enregistré.'}</p>
+        )}
+      </div>
     </form>
   )
 }

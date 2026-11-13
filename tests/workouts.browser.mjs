@@ -57,10 +57,23 @@ async function click(text, scope = 'body') {
   await settle()
 }
 
+// Les anciens parcours de correction doivent désormais ouvrir explicitement la série.
+async function revealExecutionField(selector) {
+  const formId = await call(selector => {
+    const form = document.querySelector(selector)?.closest('.workout-execution-set-compact')
+    return form?.id ?? null
+  }, selector)
+  if (formId) await click('Modifier', `#${formId}`)
+}
+
 async function enter(selector, text) {
+  await revealExecutionField(selector)
   await call((selector, text) => {
     const field = document.querySelector(selector)
     if (!field) throw new Error(`Champ introuvable : ${selector}`)
+    if (field.closest('.workout-execution-set') && !field.getClientRects().length) {
+      throw new Error(`Ouvrir la série avant de saisir : ${selector}`)
+    }
     const prototype = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, text)
     field.dispatchEvent(new Event('input', { bubbles: true }))
@@ -78,6 +91,7 @@ async function select(selector, value) {
 }
 
 async function arrow(selector, key, count = 1) {
+  await revealExecutionField(selector)
   await call((selector) => document.querySelector(selector).focus({ preventScroll: true }), selector)
   for (let index = 0; index < count; index++) {
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key === 'ArrowUp' ? 38 : 40, autoRepeat: index > 0 })
@@ -1260,6 +1274,321 @@ try {
   const executionField = (index, field) => `#execution-j6-set-${index}-${field}`
   const executionAt = async (index) => (await storedWorkouts())[0].exercises.flatMap((block) => block.sets)[index].execution
 
+  const compactSource = structuredClone(j6Source)
+  compactSource.exercises[0].sets[0].execution = { completed: true, reps: 2, loadKg: 77.5 }
+  const compactScope = executionScope(0)
+  const compactState = () => call(scope => {
+    const form = document.querySelector(scope)
+    const editor = form.querySelector('.workout-execution-editor')
+    const toggle = form.querySelector('.workout-execution-toggle')
+    const close = form.querySelector('.workout-execution-close')
+    return {
+      compact: form.classList.contains('workout-execution-set-compact'),
+      hidden: editor.hidden,
+      visibleInputs: [...form.querySelectorAll('input')].filter(input => input.getClientRects().length).length,
+      result: form.querySelector('.workout-execution-result')?.textContent,
+      planned: form.querySelector('.workout-execution-compact-planned')?.textContent,
+      status: form.querySelector('.workout-status').textContent,
+      closeDisabled: close?.disabled,
+      toggleFocused: document.activeElement === toggle,
+    }
+  }, compactScope)
+  async function setupCompactTracking(source = compactSource) {
+    await call(source => {
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source]))
+      sessionStorage.setItem('liftboard.navigation.v1', JSON.stringify({ section: 'sessions', trackingWorkoutId: source.id }))
+    }, source)
+    await reload(true)
+    await viewport(412, 'compact-setup')
+  }
+
+  await check('UX V2 lot 1 : confirmation, résumé exact et champs conservés hors tabulation', async () => {
+    await setupCompactTracking(j6Source)
+    await enter(executionField(0, 'reps'), '2')
+    await enter(executionField(0, 'loadKg'), '77,5')
+    await call(scope => {
+      const form = document.querySelector(scope)
+      window.compactForm = form
+      window.compactInput = form.querySelector('input')
+    }, compactScope)
+    await command('Emulation.setDeviceMetricsOverride', { width: 412, height: 422, deviceScaleFactor: 1, mobile: true })
+    await call(scope => {
+      const button = document.querySelector(scope).querySelector('[type="submit"]')
+      button.scrollIntoView({ block: 'end' })
+      button.focus({ preventScroll: true })
+    }, compactScope)
+    await click('Série réalisée', compactScope)
+    const state = await compactState()
+    assert.equal(state.compact, true)
+    assert.equal(state.hidden, true)
+    assert.equal(state.visibleInputs, 0)
+    assert.equal(state.result, '77,5 kg × 2 rép.')
+    assert.equal(state.planned, 'Prévu : 80 kg · 3 rép. · 80 % du 1RM')
+    assert.equal(state.status, '✓ Réalisée')
+    assert.equal(state.toggleFocused, true)
+    assert.equal(await call(() => {
+      const box = document.activeElement.getBoundingClientRect()
+      return box.top >= 0 && box.bottom <= document.querySelector('.primary-nav').getBoundingClientRect().top
+    }), true, 'Le focus reste visible au-dessus de la navigation sur une fenêtre courte')
+    assert.equal(await call(scope => document.querySelector(scope) === window.compactForm && document.querySelector(scope).querySelector('input') === window.compactInput, compactScope), true)
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 2, loadKg: 77.5 })
+    assert.equal((await storedWorkouts())[0].status, 'planned')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    assert.equal(await call(scope => {
+      const button = document.querySelector(scope).querySelector('.workout-execution-toggle')
+      return button.type === 'button' && button.getAttribute('aria-expanded') === 'false' &&
+        document.getElementById(button.getAttribute('aria-controls')).hidden &&
+        button.getAttribute('aria-describedby').split(' ').every(id => document.getElementById(id))
+    }, compactScope), true)
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.id'), 'execution-j6-set-1-reps')
+  })
+
+  await check('UX V2 lot 1 : Modifier et Fermer au clavier, sans soumission ni changement des données', async () => {
+    await setupCompactTracking()
+    const before = await storedWorkouts()
+    await call(scope => {
+      const form = document.querySelector(scope)
+      window.compactForm = form
+      window.compactInput = form.querySelector('input')
+      window.compactSubmits = 0
+      window.compactWrites = 0
+      window.compactOriginalSetItem = Storage.prototype.setItem
+      Storage.prototype.setItem = function(key, value) {
+        if (key === 'liftboard.workouts.v1') window.compactWrites++
+        return window.compactOriginalSetItem.call(this, key, value)
+      }
+      form.addEventListener('submit', () => window.compactSubmits++)
+      form.querySelector('.workout-execution-toggle').focus({ preventScroll: true })
+    }, compactScope)
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
+    assert.equal((await compactState()).compact, false)
+    assert.equal((await compactState()).visibleInputs, 2)
+    assert.equal(await evaluate('document.activeElement === window.compactInput'), true)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
+    assert.equal(await call(scope => document.querySelector(scope).querySelector('.workout-execution-close').type, compactScope), 'button')
+    await call(scope => document.querySelector(scope).querySelector('.workout-execution-close').focus({ preventScroll: true }), compactScope)
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+    await settle()
+    assert.equal((await compactState()).compact, true)
+    assert.equal((await compactState()).toggleFocused, true)
+    assert.notEqual(await evaluate('getComputedStyle(document.activeElement).outlineStyle'), 'none')
+    assert.equal(await evaluate('window.compactInput.isConnected && window.compactForm.contains(window.compactInput)'), true)
+    assert.deepEqual(await storedWorkouts(), before)
+    assert.deepEqual(await evaluate('({submits: window.compactSubmits, writes: window.compactWrites})'), { submits: 0, writes: 0 })
+    await evaluate('Storage.prototype.setItem = window.compactOriginalSetItem')
+  })
+
+  await check('UX V2 lot 1 : correction explicite, fermeture bloquée et retour au résumé après succès', async () => {
+    await setupCompactTracking()
+    await click('Modifier', compactScope)
+    await enter(executionField(0, 'reps'), '1')
+    await enter(executionField(0, 'loadKg'), '75')
+    assert.deepEqual(await storedWorkouts(), [compactSource])
+    assert.equal((await compactState()).closeDisabled, true)
+    await click('Fermer l’édition', compactScope)
+    assert.equal((await compactState()).compact, false)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '75')
+    await click('Enregistrer la correction', compactScope)
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 1, loadKg: 75 })
+    assert.equal((await compactState()).result, '75 kg × 1 rép.')
+    assert.equal((await compactState()).compact, true)
+    assert.equal((await compactState()).toggleFocused, true)
+    assert.equal(await guardActive(), false)
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    assert.deepEqual((await storedWorkouts())[0].exercises[0].sets[0].load, compactSource.exercises[0].sets[0].load)
+  })
+
+  await check('UX V2 lot 1 : saisie invalide conservée, rétablissement puis fermeture volontaire', async () => {
+    await setupCompactTracking()
+    await click('Modifier', compactScope)
+    await enter(executionField(0, 'loadKg'), '77,')
+    await click('Enregistrer la correction', compactScope)
+    assert.equal(await call(selector => document.querySelector(selector).getAttribute('aria-invalid'), executionField(0, 'loadKg')), 'true')
+    assert.equal((await compactState()).closeDisabled, true)
+    await click('Fermer l’édition', compactScope)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,')
+    assert.equal((await compactState()).compact, false)
+    assert.equal(await guardActive(), true)
+    await click('Rétablir les valeurs enregistrées', compactScope)
+    assert.equal((await compactState()).compact, false)
+    assert.equal((await compactState()).closeDisabled, false)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
+    assert.equal(await guardActive(), false)
+    await click('Fermer l’édition', compactScope)
+    assert.equal((await compactState()).compact, true)
+    assert.equal((await compactState()).toggleFocused, true)
+    assert.deepEqual(await storedWorkouts(), [compactSource])
+  })
+
+  await check('UX V2 lot 1 : annuler la réalisation conserve les valeurs et développe le formulaire', async () => {
+    await setupCompactTracking()
+    await click('Modifier', compactScope)
+    await click('Annuler l’état réalisé', compactScope)
+    assert.deepEqual(await executionAt(0), { completed: false, reps: 2, loadKg: 77.5 })
+    assert.equal((await compactState()).compact, false)
+    assert.equal((await compactState()).visibleInputs, 2)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
+    await click('Série réalisée', compactScope)
+    assert.equal((await compactState()).compact, true)
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+  })
+
+  for (const failure of ['quota', 'denied']) {
+    await check(`UX V2 lot 1 : correction en échec (${failure}), formulaire visible et nouvelle tentative`, async () => {
+      await setupCompactTracking()
+      await enter(executionField(0, 'loadKg'), '82,5')
+      await call(failure => {
+        window.compactOriginalSetItem = Storage.prototype.setItem
+        Storage.prototype.setItem = function(key, value) {
+          if (key === 'liftboard.workouts.v1') throw new DOMException('Test compact', failure === 'quota' ? 'QuotaExceededError' : 'SecurityError')
+          return window.compactOriginalSetItem.call(this, key, value)
+        }
+      }, failure)
+      await click('Enregistrer la correction', compactScope)
+      assert.equal((await compactState()).compact, false)
+      assert.equal((await compactState()).visibleInputs, 2)
+      assert.equal((await compactState()).closeDisabled, true)
+      assert.match(await call(scope => document.querySelector(scope).querySelector('[role="alert"]').textContent, compactScope), failure === 'quota' ? /Non enregistré.*plein/ : /Non enregistré.*Impossible/)
+      assert.deepEqual(await storedWorkouts(), [compactSource])
+      assert.equal(await guardActive(), true)
+      await click('Notes de séance')
+      await click('← Retour au suivi')
+      assert.equal((await compactState()).compact, false)
+      assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '82,5')
+      await evaluate('Storage.prototype.setItem = window.compactOriginalSetItem')
+      await click('Réessayer', compactScope)
+      assert.equal((await compactState()).compact, true)
+      assert.equal((await compactState()).result, '82,5 kg × 2 rép.')
+      assert.equal((await compactState()).toggleFocused, true)
+      assert.deepEqual(await executionAt(0), { completed: true, reps: 2, loadKg: 82.5 })
+      assert.equal(await guardActive(), false)
+    })
+  }
+
+  await check('UX V2 lot 1 : correction préservée dans les notes et sections, sortie et clôture protégées', async () => {
+    await setupCompactTracking()
+    await enter(executionField(0, 'loadKg'), '77,')
+    await call(selector => { window.compactInput = document.querySelector(selector) }, executionField(0, 'loadKg'))
+    await click('Notes de séance')
+    await click('← Retour au suivi')
+    await click('Calculer', '.primary-nav')
+    await click('Séances', '.primary-nav')
+    await click('Continuer ma saisie', 'dialog[open]')
+    assert.equal(await call(selector => document.querySelector(selector) === window.compactInput && window.compactInput.value === '77,', executionField(0, 'loadKg')), true)
+    assert.equal((await compactState()).compact, false)
+    await click('← Retour à la séance')
+    await click('Annuler', 'dialog[open]')
+    assert.equal(await guardActive(), true)
+    await click('Terminer la séance')
+    assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"] .record-error').textContent), /ne sont pas enregistrées/)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.deepEqual(await storedWorkouts(), [compactSource])
+    await click('Rétablir les valeurs enregistrées', compactScope)
+    await click('Fermer l’édition', compactScope)
+    await click('← Retour à la séance')
+    await click('Reprendre le suivi')
+    assert.equal((await compactState()).compact, true)
+    assert.equal((await compactState()).result, '77,5 kg × 2 rép.')
+    assert.equal(await guardActive(), false)
+  })
+
+  await check('UX V2 lot 1 : conflit de correction visible, dernière version et saisie préservées', async () => {
+    await setupCompactTracking()
+    await enter(executionField(0, 'loadKg'), '82,5')
+    await call(() => {
+      const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
+      workouts[0].exercises[0].sets[0].execution.loadKg = 60
+      localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
+    })
+    await click('Enregistrer la correction', compactScope)
+    assert.equal((await compactState()).compact, false)
+    assert.equal((await compactState()).visibleInputs, 2)
+    assert.match(await call(scope => document.querySelector(scope).querySelector('[role="alert"]').textContent, compactScope), /ont changé ailleurs/)
+    assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '82,5')
+    assert.deepEqual(await executionAt(0), { completed: true, reps: 2, loadKg: 60 })
+    assert.equal(await guardActive(), true)
+  })
+
+  await check('UX V2 lot 1 : ancien résultat à corriger développé et charge prévue absente explicite', async () => {
+    const legacy = structuredClone(compactSource)
+    legacy.exercises[0].sets[0].execution = { completed: true, reps: 0, loadKg: 0 }
+    await setupCompactTracking(legacy)
+    assert.equal((await compactState()).compact, false)
+    assert.equal((await compactState()).visibleInputs, 2)
+    assert.equal((await compactState()).status, 'À corriger')
+    assert.equal(await call(scope => document.querySelector(scope).querySelector('.workout-status').classList.contains('workout-execution-completed'), compactScope), false)
+    await enter(executionField(0, 'reps'), '2')
+    await enter(executionField(0, 'loadKg'), '77,5')
+    await click('Enregistrer la correction', compactScope)
+    assert.equal((await compactState()).compact, true)
+    const missing = structuredClone(compactSource)
+    missing.exercises[0].sets[0].load = null
+    await setupCompactTracking(missing)
+    assert.equal((await compactState()).compact, true)
+    assert.match((await compactState()).planned, /charge non renseignée/)
+    assert.equal((await compactState()).result, '77,5 kg × 2 rép.')
+    assert.equal(await call(scope => document.querySelector(scope).querySelector('.workout-execution-result strong')?.textContent ?? null, executionScope(4)), null)
+  })
+
+  await check('UX V2 lot 1 : cinq largeurs, compacité, texte agrandi et reflow à 200 %', async () => {
+    await setupCompactTracking()
+    await evaluate('document.fonts.ready.then(() => true)')
+    const measurements = []
+    for (const width of [320, 375, 412, 768, 1440]) {
+      await viewport(width, 'compact-summary')
+      await call(scope => document.querySelector(scope).scrollIntoView({ block: 'start' }), compactScope)
+      await viewport(width, 'compact-summary', true)
+      const compactHeight = await call(scope => document.querySelector(scope).getBoundingClientRect().height, compactScope)
+      await click('Modifier', compactScope)
+      await viewport(width, 'compact-editor', true)
+      const expandedHeight = await call(scope => document.querySelector(scope).getBoundingClientRect().height, compactScope)
+      // Référence développée : masquer uniquement la nouvelle commande de fermeture.
+      // Les champs, textes et styles du formulaire préexistant sont conservés.
+      const referenceHeight = await call(scope => {
+        const form = document.querySelector(scope)
+        document.activeElement.blur()
+        form.querySelector('.workout-execution-close').hidden = true
+        form.scrollIntoView({ block: 'start' })
+        return form.getBoundingClientRect().height
+      }, compactScope)
+      await viewport(width, 'compact-before-reference', true)
+      assert.equal(await call(scope => document.querySelector(scope).getBoundingClientRect().top >= 0, compactScope), true, 'La référence reste entièrement cadrée')
+      await call(scope => { document.querySelector(scope).querySelector('.workout-execution-close').hidden = false }, compactScope)
+      assert.ok(compactHeight <= referenceHeight / 2, `Résumé compact à ${width}px : ${compactHeight}px contre ${referenceHeight}px de référence`)
+      measurements.push({ width, compactHeight, referenceHeight, expandedHeight })
+      await click('Fermer l’édition', compactScope)
+    }
+    await writeFile(join(artifactDirectory, 'compact-heights.json'), JSON.stringify(measurements, null, 2))
+    console.log(`Mesures résumé / référence développée / édition (px) : ${JSON.stringify(measurements)}`)
+    await call(() => {
+      const root = getComputedStyle(document.documentElement)
+      const style = document.createElement('style')
+      style.id = 'compact-text-zoom'
+      const tokens = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl'].flatMap(size => [`--lb-text-${size}`, `--lb-leading-${size}`])
+      style.textContent = ':root {' + tokens.map(token => `${token}: ${parseFloat(root.getPropertyValue(token)) * 2}px !important;`).join('') + '}'
+      document.head.append(style)
+    })
+    await viewport(320, 'compact-text-200', true)
+    await click('Modifier', compactScope)
+    await viewport(320, 'compact-editor-text-200', true)
+    await click('Fermer l’édition', compactScope)
+    await evaluate('document.getElementById("compact-text-zoom").remove()')
+    // Même équivalent de reflow à 200 % que la recette existante ; pas un téléphone réel.
+    await command('Emulation.setDeviceMetricsOverride', { width: 720, height: 422, deviceScaleFactor: 2, mobile: false })
+    await settle()
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true)
+    assert.equal((await compactState()).visibleInputs, 0)
+    await viewport(412, 'compact-final', true)
+    assert.deepEqual(await storedWorkouts(), [compactSource])
+    await click('Retour aux séances')
+  })
+
   await check('J6 : ancienne séance lisible, suivi vide et cinq largeurs accessibles', async () => {
     await call((source) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), j6Source)
     await reload()
@@ -1409,6 +1738,7 @@ try {
   })
 
   await check('fiche commune : prévu, effectué, saisie non confirmée et absence de résultat sans écriture', async () => {
+    await click('Modifier', executionScope(1))
     await click('Annuler l’état réalisé', executionScope(1))
     const before = await storedWorkouts()
     const raw = await evaluate('localStorage.getItem("liftboard.workouts.v1")')
@@ -1637,16 +1967,23 @@ try {
     assert.equal(await guardActive(), false)
   })
 
-  await check('correctifs : dix sous-cartes lisibles, accessibles et centrées aux cinq largeurs', async () => {
+  await check('correctifs : dix séries compactes ou développées, lisibles et centrées aux cinq largeurs', async () => {
     assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 10)
     for (const width of [320, 393, 430, 768, 1440]) {
       await call(scope => document.querySelector(scope).scrollIntoView({ block: 'start' }), executionScope(0))
       await viewport(width, 'tracking-cards', width === 393 || width === 1440)
       assert.ok(await evaluate(`[...document.querySelectorAll('.workout-execution-set')].every(card => {
         const style = getComputedStyle(card)
+        const labeledInputs = [...card.querySelectorAll('input')].every(input => input.labels.length === 1 && parseFloat(getComputedStyle(input).fontSize) >= 16)
+        if (card.classList.contains('workout-execution-set-compact')) {
+          return labeledInputs && card.querySelector('.workout-execution-editor').hidden &&
+            [...card.querySelectorAll('input')].every(input => !input.getClientRects().length) &&
+            card.querySelector('.workout-execution-toggle').getClientRects().length &&
+            parseFloat(getComputedStyle(card.querySelector('.workout-execution-result strong')).fontSize) >= 32
+        }
         return parseFloat(style.borderTopWidth) >= 1 && parseFloat(style.paddingTop) >= 8 &&
           style.backgroundColor !== getComputedStyle(card.parentElement).backgroundColor &&
-          [...card.querySelectorAll('input')].every(input => input.labels.length === 1 && parseFloat(getComputedStyle(input).fontSize) >= 16)
+          labeledInputs
       })`))
     }
   })

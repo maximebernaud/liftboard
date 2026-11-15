@@ -45,13 +45,16 @@ export function workoutToDraft(workout: Workout): WorkoutDraft {
   }
 }
 
-export function createWorkoutSetDraft(previous?: WorkoutSetDraft): WorkoutSetDraft {
-  const id = crypto.randomUUID()
-  if (previous && parseRepetitions(previous.repsInput) !== null &&
-    parseWorkoutIntensity(previous.intensityInput) !== null && isWorkoutSetRounding(previous.rounding)) {
-    return { id, repsInput: previous.repsInput, intensityInput: previous.intensityInput, rounding: { ...previous.rounding } }
+export function createWorkoutSetDraft(): WorkoutSetDraft {
+  return { id: crypto.randomUUID(), repsInput: '', intensityInput: '', rounding: { mode: 'exact' } }
+}
+
+/** Copie uniquement la programmation brute, même incomplète, pour un nouveau calcul. */
+export function duplicateWorkoutSetDraft(source: WorkoutSetDraft): WorkoutSetDraft {
+  return {
+    id: crypto.randomUUID(), repsInput: source.repsInput, intensityInput: source.intensityInput,
+    rounding: { ...source.rounding },
   }
-  return { id, repsInput: '', intensityInput: '', rounding: { mode: 'exact' } }
 }
 
 /** Nouvelle préparation : aucune charge historique ni observation d'exécution. */
@@ -62,7 +65,7 @@ export function duplicateWorkoutDraft(source: Workout, date = new Date()): Worko
     notes: { before: source.notes.before, during: '', after: '' },
     exercises: source.exercises.map((block) => ({
       id: crypto.randomUUID(), exerciseId: block.exerciseId,
-      sets: block.sets.map((set) => createWorkoutSetDraft({
+      sets: block.sets.map((set) => duplicateWorkoutSetDraft({
         id: set.id, repsInput: String(set.reps), intensityInput: String(set.intensityPct), rounding: set.rounding,
       })),
     })),

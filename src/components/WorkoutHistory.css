@@ -1,4 +1,4 @@
-/* La liste seule adopte Forge Noire 2.0 : détail et notes gardent leurs styles. */
+/* Liste et fiche détaillée ont chacune leur contexte ; les notes restent indépendantes. */
 .workout-history-list {
   max-width: none;
   container: history / inline-size;
@@ -197,5 +197,112 @@
 
   .workout-history-list .history-row .workout-consult {
     justify-self: start;
+  }
+}
+
+/* Fiche terminée uniquement : aucun effet sur la liste ou les séances planifiées. */
+.workout-history-detail .workout-detail {
+  gap: var(--lb-space-6);
+}
+
+.workout-history-detail .workout-exercise,
+.workout-history-detail .workout-detail-notes {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.workout-history-detail .workout-detail-sets {
+  gap: 0;
+}
+
+.workout-history-detail .workout-set-summary {
+  padding: var(--lb-space-4) 0;
+  border: 0;
+  border-top: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.workout-history-detail .workout-exercise > h2 {
+  font-size: var(--lb-text-xl);
+  line-height: var(--lb-leading-xl);
+}
+
+.workout-history-detail .workout-set-summary h3 {
+  color: var(--lb-color-text-muted);
+  font-family: var(--lb-font-body);
+  font-size: var(--lb-text-sm);
+}
+
+.workout-history-detail .workout-comparison-planned {
+  color: var(--lb-color-text-muted);
+  font-size: var(--lb-text-lg);
+  line-height: var(--lb-leading-lg);
+}
+
+.workout-history-detail .workout-comparison-load > span {
+  font-family: var(--lb-font-body);
+  font-size: var(--lb-text-base);
+  font-weight: 400;
+}
+
+.workout-history-detail .workout-comparison-reps {
+  display: block;
+}
+
+.workout-history-detail .workout-comparison-group > p:not(.workout-comparison-load) {
+  color: var(--lb-color-text-muted);
+  font-size: var(--lb-text-sm);
+}
+
+.workout-history-detail .workout-detail-notes {
+  padding-top: var(--lb-space-5);
+  border-top: var(--lb-border-width) solid var(--lb-color-border);
+}
+
+.workout-history-detail > .workout-notice {
+  display: grid;
+  gap: var(--lb-space-1);
+  font-size: var(--lb-text-sm);
+}
+
+@media (min-width: 960px) {
+  .workout-history-detail {
+    max-width: 60rem;
+  }
+
+  .workout-history-detail .page-heading h1 {
+    font-size: var(--lb-text-3xl);
+    line-height: var(--lb-leading-3xl);
+  }
+
+  .workout-history-detail .workout-exercise > h2 {
+    font-size: var(--lb-text-2xl);
+    line-height: var(--lb-leading-2xl);
+  }
+
+  .workout-history-detail .workout-set-comparison {
+    column-gap: var(--lb-space-10);
+  }
+
+  .workout-history-detail .workout-comparison-group:last-child .workout-comparison-load {
+    color: var(--lb-color-text);
+    font-size: var(--lb-text-2xl);
+    line-height: var(--lb-leading-2xl);
+    font-weight: 700;
+  }
+
+  .workout-history-detail .workout-comparison-reps {
+    display: inline;
+  }
+
+  .workout-history-detail .workout-detail-notes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workout-history-detail .workout-detail-notes > h2 {
+    grid-column: 1 / -1;
   }
 }

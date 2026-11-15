@@ -1,4 +1,4 @@
-// Lot B : interactions de présentation, audit responsive et captures réelles.
+// Lots B et C : interactions de présentation, audit responsive et captures réelles.
 // node tests/sessions.browser.mjs http://127.0.0.1:5176
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -248,6 +248,13 @@ try {
     await enter(`#${firstSetId}-reps`, '2')
     await enter(`#${firstSetId}-intensity`, '75')
     await click('+ Ajouter une série')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-set input[id$=reps]")[1].value'), '')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-set input[id$=intensity]")[1].value'), '')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-set select")[1].value'), 'exact')
+    assert.equal(await evaluate('document.querySelectorAll(".workout-load strong")[1].textContent'), '—')
+    assert.equal(await evaluate('document.activeElement.matches("input,select,textarea")'), false)
+    await captureScreen('lot-c-01-serie-vierge')
+    await enter('.workout-set:nth-child(2) input[id$=reps]', '2')
     const secondSetId = await evaluate('document.querySelectorAll(".workout-set input[id$=intensity]")[1].id')
     await enter(`#${secondSetId}`, '80')
     await click('+ Ajouter un exercice')
@@ -273,6 +280,36 @@ try {
     assert.equal(await call(id => document.querySelector(`#${id}-rounding`).value, firstSetId), 'down-2.5')
     assert.deepEqual(await storedWorkouts(), initialStorage)
   })
+  await check('Lot C : dupliquer une série compacte insère une copie indépendante juste après', async () => {
+    const ids = await evaluate('[...document.querySelectorAll(".workout-exercise:first-of-type .workout-set legend")].map(item => item.id)')
+    await click('Replier', '.workout-exercise:first-of-type .workout-set:first-child')
+    await click('Dupliquer la série', '.workout-exercise:first-of-type .workout-set:first-child')
+    const sets = await evaluate('[...document.querySelectorAll(".workout-exercise:first-of-type .workout-set")].map(item => ({ id: item.querySelector("legend").id, reps: item.querySelector("input[id$=reps]").value, intensity: item.querySelector("input[id$=intensity]").value, rounding: item.querySelector("select").value }))')
+    assert.equal(sets.length, 3)
+    assert.equal(sets[0].id, ids[0])
+    assert.equal(sets[2].id, ids[1])
+    assert.ok(!ids.includes(sets[1].id))
+    assert.deepEqual([sets[1].reps, sets[1].intensity, sets[1].rounding], ['2', '75', 'down-2.5'])
+    await captureScreen('lot-c-02-serie-dupliquee')
+    await enter('.workout-exercise:first-of-type .workout-set:nth-child(2) input[id$=intensity]', '74,4')
+    assert.equal(await call(id => document.querySelector(`#${id}-intensity`).value, firstSetId), '75')
+    await click('Retirer la série', '.workout-exercise:first-of-type .workout-set:nth-child(2)')
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".workout-exercise:first-of-type .workout-set legend")].map(item => item.id)'), ids)
+    await click('Modifier', '.workout-exercise:first-of-type .workout-set:first-child')
+    assert.deepEqual(await storedWorkouts(), initialStorage)
+  })
+  await check('Lot C : copie incomplète, saisie brute préservée et sauvegarde bloquée', async () => {
+    await enter(`#${firstSetId}-intensity`, '75,')
+    await click('Dupliquer la série', '.workout-exercise:first-of-type .workout-set:first-child')
+    assert.equal(await evaluate('document.querySelector(".workout-exercise:first-of-type .workout-set:nth-child(2) input[id$=intensity]").value'), '75,')
+    assert.equal(await evaluate('document.querySelector(".workout-exercise:first-of-type .workout-set:nth-child(2) .workout-load strong").textContent'), '—')
+    await click('Enregistrer la séance')
+    assert.deepEqual(await storedWorkouts(), initialStorage)
+    assert.equal(await evaluate('document.querySelector(".workout-exercise:first-of-type .workout-set:nth-child(2) input[id$=intensity]").getAttribute("aria-invalid")'), 'true')
+    await click('Retirer la série', '.workout-exercise:first-of-type .workout-set:nth-child(2)')
+    await enter(`#${firstSetId}-intensity`, '75')
+    await click('Modifier', '.workout-exercise:first-of-type .workout-set:first-child')
+  })
   await check('Validation : une erreur reste ouverte et reçoit le focus', async () => {
     await enter(`#${firstSetId}-intensity`, '75,')
     await click('Modifier', '.workout-exercise:first-of-type .workout-set:nth-child(2)')
@@ -281,6 +318,19 @@ try {
     assert.equal(await evaluate('document.activeElement.getAttribute("aria-invalid")'), 'true')
     assert.equal(await call(id => document.querySelector(`#${id}-intensity`).value, firstSetId), '75,')
     await enter(`#${firstSetId}-intensity`, '75')
+  })
+  await check('Lot C : ordre des sept arrondis et résultats inchangés pour 74,4 kg', async () => {
+    await click('Modifier', '.workout-exercise:first-of-type .workout-set:first-child')
+    assert.deepEqual(await call(id => [...document.querySelector(`#${id}-rounding`).options].map(item => item.value), firstSetId),
+      ['exact', 'up-1', 'up-2.5', 'up-5', 'down-1', 'down-2.5', 'down-5'])
+    await enter(`#${firstSetId}-intensity`, '74,4')
+    for (const [rounding, load] of [['exact', '74,4 kg'], ['up-1', '75 kg'], ['up-2.5', '75 kg'], ['up-5', '75 kg'], ['down-1', '74 kg'], ['down-2.5', '72,5 kg'], ['down-5', '70 kg']]) {
+      await select(`#${firstSetId}-rounding`, rounding)
+      assert.equal(await call(id => document.querySelector(`#${id}-title`).parentElement.querySelector('.workout-load strong').textContent, firstSetId), load)
+    }
+    await enter(`#${firstSetId}-intensity`, '75')
+    await select(`#${firstSetId}-rounding`, 'down-2.5')
+    assert.deepEqual(await storedWorkouts(), initialStorage)
   })
   await check('Ajout : série visible, identifiants stables et aucun focus sur un champ', async () => {
     const ids = await evaluate('[...document.querySelectorAll(".workout-set legend")].map(item => item.id)')
@@ -321,8 +371,8 @@ try {
     await enter(`#${firstExecution} input[id$=loadKg]`, '72,5')
     await enter(`#${firstExecution} input[id$=reps]`, '3')
     await click('Série réalisée', `#${firstExecution}`)
-    assert.match(await call(id => document.querySelector(`#${id} .workout-execution-result`).textContent, firstExecution), /72,5 kg.*3 rép\./)
-    assert.match(await call(id => document.querySelector(`#${id} .workout-execution-compact-planned`).textContent, firstExecution), /75 kg.*2 rép\./)
+    assert.match(await call(id => document.querySelector(`#${id} .workout-execution-result`).textContent, firstExecution), /72,5 kg.*× 3 répétitions/)
+    assert.match(await call(id => document.querySelector(`#${id} .workout-execution-compact-planned`).textContent, firstExecution), /75 kg.*× 2 répétitions/)
     const set = (await storedWorkouts()).find(item => item.title === 'Préparation technique').exercises[0].sets[0]
     assert.deepEqual(set.execution, { completed: true, reps: 3, loadKg: 72.5 })
     assert.equal(set.load.selectedKg, 75)
@@ -360,6 +410,27 @@ try {
     assert.equal(completed.exercises[0].sets[1].execution, undefined)
     assert.equal(await evaluate('document.querySelector(".nav-button[aria-current=page]").textContent.trim()'), 'Historique')
   })
+  await check('Lot C : succès aligné avec le retour, le titre et le contenu', async () => {
+    for (const width of [320, 375, 412, 768, 1024, 1440]) {
+      await viewport(width)
+      const axes = await evaluate('[".workout-notice", ".workout-history > .workout-back", "#history-page-title", ".workout-history .workout-detail"].map(selector => document.querySelector(selector).getBoundingClientRect().left)')
+      assert.ok(axes.every(left => Math.abs(left - axes[0]) < 1), `Axes à ${width} px : ${axes}`)
+    }
+    assert.match(await evaluate('document.querySelector(".workout-notice").textContent'), /Séance terminée.*Tes performances ont été enregistrées/)
+  })
+  await captureScreen('lot-c-07-message-cloture')
+  await check('Lot C : consultation ultérieure sans message et performances dominantes', async () => {
+    await click('← Retour à l’historique', '.workout-history')
+    await click('Consulter', '.workout-history')
+    assert.equal(await evaluate('document.querySelector(".workout-notice")'), null)
+    await viewport(1440)
+    const sizes = await evaluate('({ width: document.querySelector(".workout-history-detail").getBoundingClientRect().width, loads: [...document.querySelector(".workout-set-summary").querySelectorAll(".workout-comparison-load")].map(item => parseFloat(getComputedStyle(item).fontSize)) })')
+    assert.ok(sizes.width >= 900 && sizes.width <= 1000)
+    assert.ok(sizes.loads[1] > sizes.loads[0])
+    assert.equal(await evaluate('document.querySelectorAll(".workout-history .workout-set-duplicate").length'), 0)
+  })
+  await captureScreen('lot-c-05-06-historique-detail')
+  await sweep('lot-c-historique-detail')
   assert.deepEqual(browserErrors, [])
   await writeFile(join(artifactDirectory, 'audit.json'), JSON.stringify({ passed, observations, screenshots, browserErrors }, null, 2))
   await writeFile(join(artifactDirectory, 'index.html'), `<!doctype html><html lang="fr"><meta charset="utf-8"><title>LiftBoard — Lot B</title><style>body{font:16px system-ui;background:#0f1112;color:#f3f0e8;margin:24px}section{margin-block:40px}img{max-width:100%;border:1px solid #353a3a}a{color:#facc15}</style><h1>Lot B — Captures de l’application</h1><p>Données fictives, profil isolé. ${passed} contrôles réussis. <a href="audit.json">Mesures</a></p>${screenshots.map(item => `<section><h2>${item.name} · ${item.width} px</h2><a href="${item.file}"><img src="${item.file}" loading="lazy" alt="${item.name}, largeur ${item.width} pixels"></a></section>`).join('')}</html>`)

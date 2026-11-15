@@ -17,7 +17,7 @@ export default function WorkoutDetail({ workout, onEdit, onNotes, onDelete, onTr
   const completed = workout.status === 'completed'
   const progress = getWorkoutProgress(workout)
   return (
-    <div className="workout-editor workout-detail">
+    <div className={`workout-editor workout-detail workout-detail-${workout.status}`}>
       {forge && <p className="record-hint workout-detail-progress">{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total} · charges figées à l’enregistrement.</p>}
       <div className="workout-card-actions">
         {!completed && onTrack && <button className="record-button record-button-primary" type="button" onClick={onTrack}>{started ? 'Reprendre le suivi' : 'Démarrer le suivi'}</button>}

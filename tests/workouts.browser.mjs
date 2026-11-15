@@ -298,9 +298,10 @@ async function viewport(width, name, screenshot = false, section = 'sessions') {
         return panel.width <= Math.min(main.width, 1040) + 1 && Math.abs(panel.width - main.width) <= 2 &&
           Math.abs(panel.left - main.left) <= 2;
       }
-      return panel.width <= 680 && Math.abs((panel.left + panel.right) - (main.left + main.right)) <= 2
+      const maxWidth = element.matches('.workout-history-detail') ? 960 : 680;
+      return panel.width <= maxWidth && Math.abs((panel.left + panel.right) - (main.left + main.right)) <= 2
     })()`)
-    assert.ok(centered, 'Liste Historique étendue ou éditeur centré avec largeur maximale conservée')
+    assert.ok(centered, 'Largeur propre au contexte et centrage conservés')
   }
   if (screenshot) {
     const image = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
@@ -1220,6 +1221,12 @@ try {
         return { focused: document.activeElement === button, top: box.top, bottom: box.bottom, height: innerHeight } })()`)
       assert.equal(position.focused, true)
       assert.ok(position.top >= 0 && position.bottom <= position.height - 72, 'Ajouter reste accessible au-dessus de la navigation')
+      assert.equal(await evaluate('document.querySelector(".workout-set:last-child input[id$=reps]").value'), '')
+      assert.equal(await evaluate('document.querySelector(".workout-set:last-child input[id$=intensity]").value'), '')
+      assert.equal(await evaluate('document.querySelector(".workout-set:last-child select").value'), 'exact')
+      await enter('.workout-set:last-child input[id$=reps]', '3')
+      await enter('.workout-set:last-child input[id$=intensity]', '80')
+      await select('.workout-set:last-child select', 'down-2.5')
     }
     const sets = await evaluate(`[...document.querySelectorAll('.workout-set')].map(set => ({
       reps: set.querySelector('input[id$="-reps"]').value, intensity: set.querySelector('input[id$="-intensity"]').value,
@@ -1245,11 +1252,11 @@ try {
     await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
   })
 
-  await check('ajout en édition : charges historiques intactes, nouvelle série au Record actuel', async () => {
+  await check('duplication en édition : charges historiques intactes, nouvelle série au Record actuel', async () => {
     const [before] = await storedWorkouts()
     await click('Ouvrir', '.workout-session-list')
     await click('Modifier')
-    await click('+ Ajouter une série')
+    await click('Dupliquer la série', '.workout-set:last-child')
     assert.equal(await evaluate('document.querySelector(".workout-set:last-child .workout-load strong").textContent.trim()'), '80 kg')
     assert.deepEqual(await storedWorkouts(), [before])
     await enter('.workout-set:first-child input[id$="-intensity"]', '80')
@@ -1404,8 +1411,8 @@ try {
     assert.equal(state.compact, true)
     assert.equal(state.hidden, true)
     assert.equal(state.visibleInputs, 0)
-    assert.equal(state.result, '77,5 kg × 2 rép.')
-    assert.equal(state.planned, 'Prévu : 80 kg · 3 rép. · 80 % du 1RM')
+    assert.equal(state.result, '77,5 kg × 2 répétitions')
+    assert.equal(state.planned, 'Prévu : 80 kg × 3 répétitions · 80 % du 1RM')
     assert.equal(state.status, '✓ Réalisée')
     assert.equal(state.toggleFocused, true)
     assert.equal(await call(() => {
@@ -1484,7 +1491,7 @@ try {
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '75')
     await click('Enregistrer la correction', compactScope)
     assert.deepEqual(await executionAt(0), { completed: true, reps: 1, loadKg: 75 })
-    assert.equal((await compactState()).result, '75 kg × 1 rép.')
+    assert.equal((await compactState()).result, '75 kg × 1 répétition')
     assert.equal((await compactState()).compact, true)
     assert.equal((await compactState()).toggleFocused, true)
     assert.equal(await guardActive(), false)
@@ -1553,7 +1560,7 @@ try {
       await evaluate('Storage.prototype.setItem = window.compactOriginalSetItem')
       await click('Réessayer', compactScope)
       assert.equal((await compactState()).compact, true)
-      assert.equal((await compactState()).result, '82,5 kg × 2 rép.')
+      assert.equal((await compactState()).result, '82,5 kg × 2 répétitions')
       assert.equal((await compactState()).toggleFocused, true)
       assert.deepEqual(await executionAt(0), { completed: true, reps: 2, loadKg: 82.5 })
       assert.equal(await guardActive(), false)
@@ -1583,7 +1590,7 @@ try {
     await click('← Retour à la séance')
     await click('Reprendre le suivi')
     assert.equal((await compactState()).compact, true)
-    assert.equal((await compactState()).result, '77,5 kg × 2 rép.')
+    assert.equal((await compactState()).result, '77,5 kg × 2 répétitions')
     assert.equal(await guardActive(), false)
   })
 
@@ -1621,7 +1628,7 @@ try {
     await setupCompactTracking(missing)
     assert.equal((await compactState()).compact, true)
     assert.match((await compactState()).planned, /charge non renseignée/)
-    assert.equal((await compactState()).result, '77,5 kg × 2 rép.')
+    assert.equal((await compactState()).result, '77,5 kg × 2 répétitions')
     assert.equal(await call(scope => document.querySelector(scope).querySelector('.workout-execution-completed'), executionScope(4)), null)
     assert.equal(await executionAt(4), undefined)
   })
@@ -1847,10 +1854,10 @@ try {
     assert.deepEqual(rows.map(row => row.title), ['Série 1', 'Série 2', 'Série 3', 'Série 1', 'Série 2'])
     assert.equal(rows.every(row => row.badges === 1), true)
     assert.equal(rows[0].status, 'Effectuée')
-    assert.match(rows[0].planned, /PRÉVU80 kg3 répétitions80 % du 1RM/)
-    assert.match(rows[0].lifted, /SOULEVÉ80 kg3 répétitions/)
+    assert.match(rows[0].planned, /PRÉVU80 kg × 3 répétitions\s*80 % du 1RM/)
+    assert.match(rows[0].lifted, /SOULEVÉ80 kg × 3 répétitions/)
     assert.equal(rows[1].status, 'À réaliser')
-    assert.match(rows[1].lifted, /SOULEVÉ75 kg1 répétition.*Saisie conservée, non confirmée/s)
+    assert.match(rows[1].lifted, /SOULEVÉ75 kg × 1 répétition.*Saisie conservée, non confirmée/s)
     assert.equal(rows[4].status, 'À réaliser')
     assert.equal(rows[4].lifted, 'SOULEVÉAucun résultat enregistré')
     assert.doesNotMatch(rows[4].lifted, /0 kg|0 répétition|Non effectuée/)
@@ -2246,7 +2253,7 @@ try {
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.deepEqual(await storedWorkouts(), [{ ...before[0], status: 'completed' }])
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Historique J6-B')
-    assert.equal(await evaluate('document.querySelector(".workout-notice").textContent'), 'Séance terminée et enregistrée dans l’historique.')
+    assert.equal(await evaluate('document.querySelector(".workout-notice").textContent'), 'Séance terminéeTes performances ont été enregistrées dans l’historique.')
     await click('← Retour à l’historique', historyScope)
     assert.deepEqual(await historyCards(), ['Historique J6-B'])
     assert.match(await evaluate('document.querySelector(".workout-history .workout-session-list").textContent'), /3 \/ 5 séries réalisées/)
@@ -2285,9 +2292,10 @@ try {
       assert.equal(await evaluate(`[...document.querySelectorAll('.workout-history .workout-set-summary')].every(card => {
         const style = getComputedStyle(card)
         return parseFloat(style.borderTopWidth) >= 1 && parseFloat(style.paddingTop) >= 12 &&
-          style.backgroundColor !== getComputedStyle(card.closest('.workout-exercise')).backgroundColor &&
+          style.backgroundColor === getComputedStyle(card.closest('.workout-exercise')).backgroundColor &&
+          parseFloat(style.borderRadius) === 0 &&
           card.querySelectorAll('h3').length === 1 && card.querySelectorAll('.workout-comparison-group').length === 2 &&
-          [...card.querySelectorAll('.workout-comparison-load')].every(load => parseFloat(getComputedStyle(load).fontSize) >= 24)
+          [...card.querySelectorAll('.workout-comparison-load')].every(load => parseFloat(getComputedStyle(load).fontSize) >= (load.classList.contains("workout-comparison-planned") ? 18 : 24))
       })`), true)
       const columns = await evaluate(`getComputedStyle(document.querySelector('.workout-set-comparison')).gridTemplateColumns.split(' ').length`)
       assert.equal(columns, width === 320 ? 1 : 2)
@@ -2500,7 +2508,7 @@ try {
     await enter('.workout-exercise input[id$="-reps"]', '2')
     await enter('.workout-exercise input[id$="-intensity"]', '83,3')
     await select('.workout-exercise select[id$="-rounding"]', 'down-2.5')
-    for (let index = 0; index < 4; index++) await click('+ Ajouter une série')
+    for (let index = 0; index < 4; index++) await click('Dupliquer la série', '.workout-set:last-child')
     assert.equal(await evaluate('document.querySelectorAll(".workout-record-context strong").length'), 1)
     assert.equal(await evaluate('document.querySelector(".workout-record-context").textContent.trim()'), 'Record actuel (1RM) : 100 kg')
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Intensité (% du 1RM)").length'), 5)
@@ -2508,9 +2516,8 @@ try {
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set .workout-load")].every(load => /Charge prévue.*82,5 kg.*Charge exacte calculée : 83,3 kg/.test(load.textContent))'), true)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-editor > .record-hint")].filter(p => p.textContent === "La charge est calculée automatiquement à partir du 1RM et de l’intensité choisie.").length'), 1)
     assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select").options].map(option => option.textContent)'), [
-      'Sans arrondi', 'Vers le bas · 1 kg', 'Vers le haut · 1 kg',
-      'Vers le bas · 2,5 kg', 'Vers le haut · 2,5 kg',
-      'Vers le bas · 5 kg', 'Vers le haut · 5 kg',
+      'Sans arrondi', 'Arrondi supérieur · 1 kg', 'Arrondi supérieur · 2,5 kg',
+      'Arrondi supérieur · 5 kg', 'Arrondi inférieur · 1 kg', 'Arrondi inférieur · 2,5 kg', 'Arrondi inférieur · 5 kg',
     ])
     await select('.workout-field > select:not([id$="-rounding"])', 'front-squat')
     assert.match(await evaluate('document.querySelector(".workout-record-context").textContent'), /Record à renseigner/)
@@ -2532,7 +2539,7 @@ try {
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-load > strong")].every(load => load.textContent === "82,5 kg")'), true)
     await click('Annuler')
     await click('Démarrer le suivi')
-    assert.equal(await evaluate('[...document.querySelectorAll(".workout-execution-planned")].every(p => /83,3 % du 1RM.*82,5 kg/.test(p.textContent))'), true)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-execution-planned")].every(p => /82,5 kg.*× 2 répétitions.*83,3 % du 1RM/.test(p.textContent))'), true)
     assert.equal(await evaluate('document.querySelectorAll(".workout-record-context").length'), 0)
     const form = await evaluate('document.querySelector(".workout-execution-set").id')
     await click('Série réalisée', `#${form}`)
@@ -2540,7 +2547,7 @@ try {
     assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /1 série sur 5.*Les 4 autres séries/s)
     await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
-    assert.equal(await evaluate('[...document.querySelectorAll(".workout-history .workout-comparison-planned")].every(load => load.textContent === "82,5 kg")'), true)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-history .workout-comparison-planned")].every(load => load.textContent.trim() === "82,5 kg × 2 répétitions")'), true)
     assert.equal(await evaluate('document.querySelector(".workout-history").textContent.includes("110 kg")'), false)
     assert.deepEqual((await storedWorkouts())[0].exercises[0].sets.map(set => set.load), before.exercises[0].sets.map(set => set.load))
   })
@@ -3282,7 +3289,7 @@ try {
       assert.equal(state.compact, true)
       assert.equal(state.visibleInputs, 0)
       assert.equal(state.status, 'À réaliser')
-      assert.match(state.result, new RegExp(`${70 + index * 5} kg.*${index === 4 ? 1 : 2} rép\\..*${70 + index * 5} % du 1RM`))
+      assert.match(state.result, new RegExp(`${70 + index * 5} kg.*${index === 4 ? 1 : 2} répétition${index === 4 ? '' : 's'}.*${70 + index * 5} % du 1RM`))
     }
     assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('reps')), '')
     assert.equal(await call(selector => document.querySelector(selector).placeholder, lot2Field('reps')), '2')
@@ -3328,7 +3335,7 @@ try {
     assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 70 })
     assert.equal((await lot2State()).status, '✓ Réalisée')
     assert.equal((await lot2State()).compact, true)
-    assert.equal((await lot2State()).result, '70 kg × 2 rép.')
+    assert.equal((await lot2State()).result, '70 kg × 2 répétitions')
     assert.equal((await lot2State(0, 1)).visibleInputs, 0)
     assert.equal(await call(scope => document.querySelector(scope).classList.contains('workout-execution-set-ready'), lot2Scope(0, 1)), true)
     assert.equal(await call(scope => document.activeElement === document.querySelector(scope).querySelector('.workout-execution-toggle'), lot2Scope()), true)
@@ -3377,7 +3384,7 @@ try {
     await enter(lot2Field('loadKg'), '69,6')
     await click('Série réalisée', lot2Scope())
     assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 69.6 })
-    assert.equal((await lot2State()).result, '69,6 kg × 2 rép.')
+    assert.equal((await lot2State()).result, '69,6 kg × 2 répétitions')
     assert.deepEqual((await storedWorkouts())[0].exercises[0].sets[0].load, { exactKg: 70, selectedKg: 70 })
   })
 

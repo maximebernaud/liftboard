@@ -92,7 +92,7 @@ function App() {
     setHistoryFilters((current) => historyFiltersForWorkout(current, completed))
     setHistoryView({ workoutId: id, notes: false })
     setNavigation({ section: 'history', trackingWorkoutId: null })
-    setWorkoutNotice('Séance terminée et enregistrée dans l’historique.')
+    setWorkoutNotice('Tes performances ont été enregistrées dans l’historique.')
     document.getElementById('main-content')?.focus({ preventScroll: true })
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
@@ -230,9 +230,12 @@ function App() {
         </section>
 
         <section hidden={activeSection !== 'history'} aria-label="Historique des séances">
-          {workoutNotice && activeSection === 'history' && <p className="workout-notice" role="status">{workoutNotice}</p>}
           <WorkoutHistory key={dataRevision} stored={storedWorkouts} onStoredChange={setStoredWorkouts} onSessions={resumeWorkout}
-            filters={historyFilters} onFiltersChange={setHistoryFilters} view={historyView} onViewChange={setHistoryView}
+            completionNotice={activeSection === 'history' ? workoutNotice : null}
+            filters={historyFilters} onFiltersChange={setHistoryFilters} view={historyView} onViewChange={(view) => {
+              setHistoryView(view)
+              setWorkoutNotice(null)
+            }}
             onPendingChange={setPendingHistory}
             pendingSessionTitle={pendingSessions.replacement?.title ?? null}
             onReopened={(result, id) => {

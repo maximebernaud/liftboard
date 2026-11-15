@@ -26,8 +26,9 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
       <div className="workout-set-comparison">
         <div className="workout-comparison-group">
           <p className="workout-label">PRÉVU</p>
-          <p className="workout-comparison-load workout-comparison-planned">{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : 'Non renseignée'}</p>
-          <p>{set.reps} répétition{set.reps > 1 ? 's' : ''}</p>
+          <p className="workout-comparison-load workout-comparison-planned">{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : 'Non renseignée'}{' '}
+            <span className="workout-comparison-reps">× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span>
+          </p>
           <p>{executionNumberInput(set.intensityPct)} % du 1RM</p>
           {set.rounding.mode !== 'exact' && <p className="record-hint">{roundingLabel(set.rounding)}</p>}
           {set.load && set.load.exactKg !== set.load.selectedKg && <p className="record-hint">Charge exacte calculée : {executionNumberInput(set.load.exactKg)} kg</p>}
@@ -35,8 +36,9 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
         <div className="workout-comparison-group">
           <p className="workout-label">SOULEVÉ</p>
           {execution ? <>
-            <p className="workout-comparison-load">{execution.loadKg === null ? 'Non renseignée' : <>{executionNumberInput(execution.loadKg)} <span>kg</span></>}</p>
-            <p>{execution.reps === null ? 'Répétitions non renseignées' : `${executionNumberInput(execution.reps)} répétition${execution.reps > 1 ? 's' : ''}`}</p>
+            <p className="workout-comparison-load">{execution.loadKg === null ? 'Non renseignée' : <>{executionNumberInput(execution.loadKg)} <span>kg</span></>}{' '}
+              <span className="workout-comparison-reps">{execution.reps === null ? 'Répétitions non renseignées' : `× ${executionNumberInput(execution.reps)} répétition${execution.reps > 1 ? 's' : ''}`}</span>
+            </p>
             {!execution.completed && <p className="record-hint">Saisie conservée, non confirmée comme effectuée.</p>}
           </> : <p>{workoutStatus === 'planned' ? 'Aucun résultat enregistré' : 'Non effectuée'}</p>}
         </div>

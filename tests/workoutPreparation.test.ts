@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createWorkout, loadWorkouts, workoutsStorageKey, type WorkoutStorage } from '../src/data/workouts.ts'
 import {
-  createWorkoutDraft, createWorkoutExerciseDraft, createWorkoutSetDraft, duplicateWorkoutDraft,
+  createWorkoutDraft, createWorkoutExerciseDraft, createWorkoutSetDraft, duplicateWorkoutDraft, duplicateWorkoutSetDraft,
   getWorkoutSetLoad, updateDraftSet, validateWorkoutDraft, workoutToDraft,
 } from '../src/lib/workoutDraft.ts'
 import type { Workout, WorkoutDraft, WorkoutSetDraft, WorkoutSetRounding } from '../src/types/workout.ts'
@@ -29,11 +29,11 @@ function validate(draft: WorkoutDraft, record?: number): Workout {
 
 const allIds = (value: Workout | WorkoutDraft) => [value.id, ...value.exercises.flatMap((block) => [block.id, ...block.sets.map((set) => set.id)])]
 
-describe('recopie de la dernière série', () => {
+describe('ajout vierge et duplication explicite d’une série', () => {
   it('produit cinq séries indépendantes avec paramètres et charges identiques', () => {
     const first: WorkoutSetDraft = { ...createWorkoutSetDraft(), repsInput: '3', intensityInput: '80', rounding: { mode: 'down', increment: 2.5 } }
     const sets = [first]
-    for (let index = 0; index < 4; index++) sets.push(createWorkoutSetDraft(sets.at(-1)))
+    for (let index = 0; index < 4; index++) sets.push(duplicateWorkoutSetDraft(sets.at(-1)!))
     assert.equal(new Set(sets.map((set) => set.id)).size, 5)
     for (const set of sets) {
       assert.equal(set.repsInput, '3')
@@ -50,15 +50,32 @@ describe('recopie de la dernière série', () => {
     assert.deepEqual(first.rounding, { mode: 'down', increment: 2.5 })
   })
 
-  it('laisse une série vide si la dernière est absente, incomplète ou invalide', () => {
+  it('ajoute une série vierge après une programmation existante, sans charge ni résultat', () => {
+    const source = validSource()
+    const added = createWorkoutSetDraft()
+    assert.notEqual(added.id, source.id)
+    assert.deepEqual(added, { id: added.id, repsInput: '', intensityInput: '', rounding: { mode: 'exact' } })
+    assert.deepEqual(getWorkoutSetLoad(added, 100), { status: 'invalid-input' })
+    const draft = workoutToDraft(sourceWorkout())
+    draft.exercises[0].sets.push(added)
+    assert.equal(validateWorkoutDraft(draft).valid, false)
+  })
+
+  it('duplique les saisies incomplètes ou invalides sans contourner la validation', () => {
     const first: WorkoutSetDraft = { ...createWorkoutSetDraft(), repsInput: '3', intensityInput: '80', rounding: { mode: 'exact' } }
-    for (const previous of [undefined, { ...first, repsInput: '' }, { ...first, intensityInput: '75,' },
+    for (const previous of [{ ...first, repsInput: '' }, { ...first, intensityInput: '75,' },
       { ...first, repsInput: '2.5' }, { ...first, intensityInput: '101' },
       { ...first, rounding: { mode: 'up', increment: 3 } as unknown as WorkoutSetRounding }]) {
-      const copy = createWorkoutSetDraft(previous)
-      assert.equal(copy.repsInput, '')
-      assert.equal(copy.intensityInput, '')
-      assert.deepEqual(copy.rounding, { mode: 'exact' })
+      const copy = duplicateWorkoutSetDraft(previous)
+      assert.notEqual(copy.id, previous.id)
+      assert.equal(copy.repsInput, previous.repsInput)
+      assert.equal(copy.intensityInput, previous.intensityInput)
+      assert.deepEqual(copy.rounding, previous.rounding)
+      assert.notEqual(copy.rounding, previous.rounding)
+      assert.deepEqual(getWorkoutSetLoad(copy, 100), { status: 'invalid-input' })
+      const draft = workoutToDraft(sourceWorkout())
+      draft.exercises[0].sets.push(copy)
+      assert.equal(validateWorkoutDraft(draft).valid, false)
     }
   })
 
@@ -67,7 +84,7 @@ describe('recopie de la dernière série', () => {
     const draft = workoutToDraft(source)
     const block = draft.exercises[0]
     const previous = block.sets.at(-1)!
-    const copy = createWorkoutSetDraft(previous)
+    const copy = duplicateWorkoutSetDraft(previous)
     assert.equal('savedLoad' in copy, false)
     block.sets.push(copy)
     const result = validate(draft, 120)
@@ -80,13 +97,43 @@ describe('recopie de la dernière série', () => {
   it('prend la dernière saisie valide, préserve virgule et point, sans copier une absence figée', () => {
     for (const intensityInput of ['73,3', '73.3']) {
       const previous = { ...createWorkoutSetDraft(), repsInput: '03', intensityInput, savedLoad: null }
-      const copy = createWorkoutSetDraft(previous)
+      const copy = duplicateWorkoutSetDraft(previous)
       assert.equal(copy.repsInput, '03')
       assert.equal(copy.intensityInput, intensityInput)
       assert.deepEqual(getWorkoutSetLoad(copy, 100), { status: 'ready', exactKg: 73.3, selectedKg: 73.3 })
     }
   })
+
+  it('exclut toute observation d’exécution et persiste les identités après enregistrement', () => {
+    const previous = { ...validSource(), execution: { completed: true, reps: 2, loadKg: 70, cleared: { reps: true } } }
+    const before = structuredClone(previous)
+    const copy = duplicateWorkoutSetDraft(previous)
+    assert.deepEqual(Object.keys(copy).sort(), ['id', 'intensityInput', 'repsInput', 'rounding'])
+    assert.deepEqual(previous, before)
+    const draft = workoutToDraft(sourceWorkout())
+    draft.exercises[0].sets.splice(1, 0, copy)
+    const saved = validate(draft, 100)
+    let raw: string | null = null
+    const storage: WorkoutStorage = { getItem: () => raw, setItem: (_, value) => { raw = value } }
+    assert.equal(createWorkout(saved, storage).ok, true)
+    assert.deepEqual(loadWorkouts(storage), { ok: true, workouts: [saved] })
+    assert.equal(saved.exercises[0].sets[1].id, copy.id)
+    assert.equal(saved.exercises[0].sets[1].execution, undefined)
+  })
+
+  it('conserve les résultats d’arrondi pour une charge exacte de 74,4 kg', () => {
+    for (const [increment, down, up] of [[1, 74, 75], [2.5, 72.5, 75], [5, 70, 75]] as const) {
+      for (const [mode, selectedKg] of [['down', down], ['up', up]] as const) {
+        const copy = duplicateWorkoutSetDraft({ ...validSource(), intensityInput: '74,4', rounding: { mode, increment } })
+        assert.deepEqual(getWorkoutSetLoad(copy, 100), { status: 'ready', exactKg: 74.4, selectedKg })
+      }
+    }
+  })
 })
+
+function validSource(): WorkoutSetDraft {
+  return { ...createWorkoutSetDraft(), repsInput: '03', intensityInput: '74,4', rounding: { mode: 'up', increment: 2.5 }, savedLoad: { exactKg: 60, selectedKg: 60 } }
+}
 
 describe('duplication d’une séance vers un brouillon', () => {
   it('copie les paramètres dans le même ordre, avec de nouvelles identités', () => {

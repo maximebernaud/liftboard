@@ -3,6 +3,7 @@ import { exercises,type RecordsLoadResult } from '../data/personalRecords'
 import {
   createWorkoutExerciseDraft,
   createWorkoutSetDraft,
+  duplicateWorkoutSetDraft,
   changeDraftMovement,
   getWorkoutSetLoad,
   hasWorkoutExerciseData,
@@ -19,18 +20,11 @@ import WorkoutConfirmation from './WorkoutConfirmation'
 // Un seul contrôle combine le pas et la direction pour rester compact sur mobile.
 const roundingOptions: { value: string; label: string; rounding: WorkoutSetRounding }[]=[
   { value: 'exact',label: 'Sans arrondi',rounding: { mode: 'exact' } },
-  ...roundingIncrements.flatMap((increment) => [
-    {
-      value: `down-${increment}`,
-      label: `Vers le bas · ${increment.toString().replace('.',',')} kg`,
-      rounding: { mode: 'down' as const,increment },
-    },
-    {
-      value: `up-${increment}`,
-      label: `Vers le haut · ${increment.toString().replace('.',',')} kg`,
-      rounding: { mode: 'up' as const,increment },
-    },
-  ]),
+  ...(['up','down'] as const).flatMap((mode) => roundingIncrements.map((increment) => ({
+    value: `${mode}-${increment}`,
+    label: `Vers le ${mode==='up'? 'haut':'bas'} · ${increment.toString().replace('.',',')} kg`,
+    rounding: { mode,increment },
+  }))),
 ]
 
 type DraftFieldProps={
@@ -98,10 +92,13 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
   useEffect(() => {
     if(!revealAddedSet.current) return
     // Révéler le numéro et les champs ajoutés sans déplacer le focus vers un input.
-    addSetButton.current?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
-    document.getElementById(`workout-set-${revealAddedSet.current}-title`)?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
+    if(block.sets.at(-1)?.id===revealAddedSet.current) {
+      addSetButton.current?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
+    }
+    const title=document.getElementById(`workout-set-${revealAddedSet.current}-title`)
+    title?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
     revealAddedSet.current=null
-  },[block.sets.length])
+  },[block.sets])
 
   return (
     <article className="workout-exercise" aria-labelledby={`${blockId}-title`}>
@@ -254,6 +251,21 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
                       {expanded? 'Replier':'Modifier'}
                     </button>
                     <button
+                      className="record-button workout-set-duplicate"
+                      type="button"
+                      aria-label={`Dupliquer la série ${index+1} de l’exercice ${number}`}
+                      onClick={() => {
+                        const copy=duplicateWorkoutSetDraft(set)
+                        revealAddedSet.current=copy.id
+                        setExpandedSetId(copy.id)
+                        onChange((draft) => updateDraftExercise(draft,block.id,(current) => ({
+                          ...current,sets: current.sets.flatMap((item) => item.id===set.id? [item,copy]:[item]),
+                        })))
+                      }}
+                    >
+                      Dupliquer la série
+                    </button>
+                    <button
                       className="record-button record-button-delete workout-remove"
                       type="button"
                       aria-label={`Retirer la série ${index+1} de l’exercice ${number} : ${exerciseName}`}
@@ -281,7 +293,7 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
         type="button"
         aria-label={`Ajouter une série à l’exercice ${number} : ${exerciseName}`}
         onClick={() => {
-          const set=createWorkoutSetDraft(block.sets.at(-1))
+          const set=createWorkoutSetDraft()
           revealAddedSet.current=set.id
           setExpandedSetId(set.id)
           onChange((draft) => updateDraftExercise(draft,block.id,(current) => ({

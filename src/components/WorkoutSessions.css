@@ -31,7 +31,7 @@
 }
 
 .workout-sessions-forge .record-button:where(.workout-back, .workout-notes-link, .workout-remove,
-  .workout-set-toggle, .workout-execution-toggle, .workout-execution-close,
+  .workout-set-toggle, .workout-set-duplicate, .workout-execution-toggle, .workout-execution-close,
   .workout-session-actions > button:not(:first-child), .workout-form-actions > button:not(:first-child),
   .workout-card-actions > button:last-child, .data-backup-actions > button:last-child) {
   border-color: transparent;
@@ -466,15 +466,27 @@
 }
 
 .workout-sessions-forge .workout-set-summary-unstarted .workout-comparison-group:first-child {
+  grid-column: 1 / -1;
+}
+
+.workout-sessions-forge .workout-detail-planned .workout-comparison-planned {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--lb-space-2);
-  grid-column: 1 / -1;
+  font-size: 3rem;
 }
 
-.workout-sessions-forge .workout-set-summary-unstarted .workout-comparison-load {
-  flex-basis: 100%;
+.workout-sessions-forge .workout-detail-planned .workout-comparison-reps {
+  color: var(--lb-color-text);
+  font-size: var(--lb-text-lg);
+}
+
+.workout-sessions-forge .workout-set-duplicate {
+  min-height: var(--lb-touch-min);
+  padding-inline: var(--lb-space-2);
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
 }
 
 .workout-sessions-forge .workout-detail-notes {
@@ -511,6 +523,13 @@
 
 .workout-sessions-forge .workout-tracking-navigation .workout-back {
   margin: 0;
+}
+
+.workout-sessions-forge .workout-tracking-navigation .workout-notes-link {
+  min-height: var(--lb-touch-min);
+  border-color: var(--lb-color-control-border);
+  color: var(--lb-color-text);
+  background: var(--lb-color-surface);
 }
 
 .workout-sessions-forge .workout-execution-progress {
@@ -630,13 +649,13 @@
   gap: var(--lb-space-2);
 }
 
-.workout-sessions-forge .workout-execution-planned strong:last-child {
+.workout-sessions-forge .workout-execution-planned strong {
   font-family: var(--lb-font-display);
   font-size: 2.5rem;
   line-height: 1.15;
 }
 
-.workout-sessions-forge .workout-execution-planned strong:last-child > span {
+.workout-sessions-forge .workout-execution-planned strong > span {
   color: var(--lb-color-text-muted);
   font-family: var(--lb-font-body);
   font-size: var(--lb-text-base);
@@ -730,10 +749,6 @@
     grid-template-columns: minmax(8rem, .5fr) minmax(0, 1fr);
     align-items: baseline;
     column-gap: var(--lb-space-5);
-  }
-
-  .workout-sessions-forge .workout-set-summary-unstarted .workout-comparison-load {
-    flex: 0 0 20%;
   }
 
   .workout-sessions-forge .workout-detail-notes {

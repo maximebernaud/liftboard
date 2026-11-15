@@ -138,7 +138,7 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
         {plannedReady && <p className="workout-label">Prévu</p>}
         <p id={`${id}-planned-result`} className="workout-execution-result">
           <strong>{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : '—'}</strong>{' '}
-          <span>× {set.reps} rép.</span>{' '}
+          <span>× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span>{' '}
           <span className="workout-execution-intensity">{executionNumberInput(set.intensityPct)} % du 1RM</span>
         </p>
         {!confirmation.execution && <p className="record-hint">
@@ -153,18 +153,18 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
       {compact && saved?.completed && <div className="workout-execution-compact-summary">
         <p id={`${id}-result`} className="workout-execution-result">
           <strong>{executionNumberInput(saved.loadKg)} <span>kg</span></strong>{' '}
-          <span>× {executionNumberInput(saved.reps)} rép.</span>
+          <span>× {executionNumberInput(saved.reps)} répétition{saved.reps > 1 ? 's' : ''}</span>
         </p>
         <p id={`${id}-planned-summary`} className="workout-execution-compact-planned">
           Prévu : {set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : 'charge non renseignée'}
-          {' · '}{set.reps} rép. · {executionNumberInput(set.intensityPct)} % du 1RM
+          {' × '}{set.reps} répétition{set.reps > 1 ? 's' : ''} · {executionNumberInput(set.intensityPct)} % du 1RM
         </p>
       </div>}
       {/* Le formulaire reste monté : replier ne réinitialise ni saisie ni référence de conflit. */}
       <div id={`${id}-editor`} className="workout-execution-editor" hidden={compact || plannedReady}>
         <div className="workout-execution-planned">
           <p className="workout-label">Prévu</p>
-          <p><strong>{set.reps} rép.</strong><span aria-hidden="true"> · </span>{executionNumberInput(set.intensityPct)} % du 1RM<span aria-hidden="true"> · </span><strong>{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : '—'}</strong></p>
+          <p><strong>{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : '—'}</strong>{' '}<span>× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span><span aria-hidden="true"> · </span>{executionNumberInput(set.intensityPct)} % du 1RM</p>
         </div>
         <fieldset className="workout-execution-fields">
           <legend>Réalisé</legend>
@@ -191,7 +191,7 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
         </fieldset>
         {needsCorrection && <p className="record-error">Ancien résultat à corriger : répétitions et charge doivent être strictement positives et dans les limites numériques sûres. Les valeurs enregistrées sont conservées.</p>}
         <p id={`${id}-hint`} className="record-hint">Les champs laissés intacts reprennent le prévu à la confirmation. {set.load === null && 'Charge absente : renseignez les kg.'}</p>
-        {saved?.completed && <p className="record-hint">Enregistré : {executionNumberInput(saved.reps)} rép. à {executionNumberInput(saved.loadKg)} kg.</p>}
+        {saved?.completed && <p className="record-hint">Enregistré : {executionNumberInput(saved.loadKg)} kg × {executionNumberInput(saved.reps)} répétition{saved.reps > 1 ? 's' : ''}.</p>}
         <div className="workout-form-actions">
           {(!saved?.completed || pending || needsCorrection) && <button className="record-button record-button-primary" type="submit">
             {saved?.completed ? 'Enregistrer la correction' : 'Série réalisée'}

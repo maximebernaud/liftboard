@@ -13,7 +13,7 @@ import './WorkoutHistory.css'
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 export type HistoryView = { workoutId: string | null; notes: boolean }
 
-export default function WorkoutHistory({ stored, onStoredChange, onSessions, onReopened, filters, onFiltersChange, view, onViewChange, onPendingChange, pendingSessionTitle }: {
+export default function WorkoutHistory({ stored, onStoredChange, onSessions, onReopened, filters, onFiltersChange, view, onViewChange, onPendingChange, pendingSessionTitle, completionNotice }: {
   stored: WorkoutsResult
   onStoredChange: (result: WorkoutsResult) => void
   onSessions: () => void
@@ -24,6 +24,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   onViewChange: (view: HistoryView) => void
   onPendingChange: (pending: boolean) => void
   pendingSessionTitle: string | null
+  completionNotice: string | null
 }) {
   const selectedId = view.workoutId
   const [notesWorkout, setNotesWorkout] = useState<Workout | null>(null)
@@ -80,7 +81,11 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   }
 
   return (
-    <div className={`workout-sessions workout-history${!selectedId && !view.notes ? ' workout-history-list' : ''}`}>
+    <div className={`workout-sessions workout-history${!selectedId && !view.notes ? ' workout-history-list' : selectedId && !view.notes ? ' workout-history-detail' : ''}`}>
+      {completionNotice && <div className="workout-notice" role="status">
+        <strong>Séance terminée</strong>
+        <p>{completionNotice}</p>
+      </div>}
       {notesWorkout && (view.notes || pendingNotes) && (
         <div ref={notesPanel} hidden={!view.notes}>
           <WorkoutQuickNotes key={notesWorkout.id} workout={notesWorkout} headingId={view.notes ? 'history-page-title' : 'history-notes-page-title'}

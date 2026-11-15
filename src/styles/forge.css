@@ -1,0 +1,115 @@
+/* Forge Noire 2.0 : composition des pages du lot A, sans styles métier Séances. */
+.forge-heading {
+  margin-bottom: var(--lb-space-10);
+}
+
+.forge-heading .forge-kicker {
+  margin: 0 0 var(--lb-space-5);
+  color: var(--lb-color-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.forge-heading h1 {
+  font-size: clamp(3rem, 6vw, 4.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+}
+
+.forge-heading h1 + p {
+  max-width: 44rem;
+  margin-top: var(--lb-space-4);
+  line-height: 1.6;
+}
+
+.site-header {
+  background: var(--lb-color-bg);
+}
+
+.brand-mark {
+  display: none;
+}
+
+.brand-name {
+  font-size: 1.875rem;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+}
+
+.brand-discipline {
+  margin-top: var(--lb-space-2);
+  color: var(--lb-color-accent);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.navigation-signature {
+  display: none;
+}
+
+@media (min-width: 960px) {
+  .app-navigation {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-navigation,
+  .app-navigation .site-header,
+  .primary-nav {
+    background: var(--lb-color-surface);
+  }
+
+  .header-content {
+    margin-inline: var(--lb-space-6);
+    padding-block: var(--lb-space-8) var(--lb-space-12);
+  }
+
+  .primary-nav {
+    padding-inline: var(--lb-space-5);
+  }
+
+  .nav-button {
+    border-radius: var(--lb-space-1);
+    padding-inline: var(--lb-space-4);
+  }
+
+  .nav-button[aria-current='page'] {
+    background: color-mix(in srgb, var(--lb-color-accent) 8%, var(--lb-color-surface));
+  }
+
+  .nav-button[aria-current='page']::before {
+    inset-block: 0;
+    height: auto;
+    width: 2px;
+    border-radius: 0;
+  }
+
+  .forge-heading {
+    margin-bottom: var(--lb-space-12);
+  }
+
+  .navigation-signature {
+    display: block;
+    margin-top: auto;
+    padding: var(--lb-space-6);
+    color: var(--lb-color-text-muted);
+    font-size: 0.6875rem;
+    line-height: 1.6;
+  }
+
+  .navigation-signature p {
+    margin-bottom: var(--lb-space-1);
+    font-family: var(--lb-font-display);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+}

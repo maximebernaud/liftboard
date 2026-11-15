@@ -1,0 +1,245 @@
+.records-catalog {
+  display: grid;
+  gap: var(--lb-space-8);
+}
+
+.records-group {
+  container: records / inline-size;
+}
+
+.records-group-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8em, 12em) 8em;
+  gap: var(--lb-space-6);
+  align-items: baseline;
+  padding-bottom: var(--lb-space-3);
+  border-bottom: var(--lb-border-width) solid var(--lb-color-border);
+}
+
+.records-group-heading h2 {
+  color: var(--lb-color-accent);
+  font-family: var(--lb-font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.records-group-heading > span {
+  color: var(--lb-color-text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.records-catalog .exercise-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.records-catalog .exercise-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8em, 12em) 8em;
+  align-items: center;
+  gap: var(--lb-space-6);
+  min-height: 0;
+  padding: var(--lb-space-5) 0;
+  border: 0;
+  border-bottom: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.records-catalog .exercise-card > h3 {
+  font-size: 1.625rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.records-catalog .exercise-record {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.records-catalog .record-value {
+  color: var(--lb-color-text);
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.records-catalog .record-value > span {
+  margin-inline-start: var(--lb-space-1);
+  font-family: var(--lb-font-body);
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.records-catalog .record-actions {
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+}
+
+.records-catalog .record-actions > button,
+.record-editor-dialog .record-form-actions > button:not(.record-button-primary) {
+  border-color: var(--lb-color-accent);
+  border-radius: var(--lb-space-1);
+  color: var(--lb-color-accent);
+  background: transparent;
+  font-size: 0.875rem;
+}
+
+.records-catalog .record-actions > button {
+  width: 100%;
+}
+
+.records-catalog .record-actions > button:hover {
+  background: var(--lb-color-raised);
+}
+
+.records-footer {
+  margin-block: var(--lb-space-12) 0;
+}
+
+.records-catalog .record-editor-dialog {
+  width: min(calc(100% - 2 * var(--lb-space-4)), 30rem);
+  padding: var(--lb-space-6);
+  border-radius: var(--lb-radius-sm);
+}
+
+.record-editor-kicker {
+  margin-bottom: var(--lb-space-2);
+  color: var(--lb-color-accent);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.records-catalog .record-editor-dialog h2 {
+  margin-bottom: var(--lb-space-3);
+  font-size: 2.25rem;
+  line-height: 1.15;
+}
+
+.record-editor-dialog .record-form {
+  margin-top: var(--lb-space-6);
+  padding: 0;
+  border: 0;
+}
+
+.record-input-unit {
+  position: relative;
+  min-width: 0;
+}
+
+.record-editor-dialog .record-input-unit input {
+  padding-inline-end: var(--lb-space-12);
+  border-radius: var(--lb-space-1);
+  background: var(--lb-color-bg);
+  font-family: var(--lb-font-display);
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.record-input-unit > span {
+  position: absolute;
+  inset-inline-end: var(--lb-space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--lb-color-text-muted);
+  pointer-events: none;
+}
+
+.record-editor-dialog .record-form-actions {
+  margin-top: var(--lb-space-3);
+}
+
+.record-editor-dialog .record-form-actions > button {
+  flex: 1 1 9em;
+  border-radius: var(--lb-space-1);
+}
+
+.record-editor-dialog .record-form-actions > .record-button-primary {
+  flex-grow: 2;
+}
+
+.record-editor-dialog .record-suspend {
+  justify-self: start;
+  min-height: var(--lb-touch-min);
+  padding: var(--lb-space-2) 0;
+  border: 0;
+  color: var(--lb-color-text-muted);
+  background: transparent;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+@container records (max-width: 44em) {
+  .records-group-heading {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: var(--lb-space-2);
+    border: 0;
+  }
+
+  .records-group-heading > span {
+    display: none;
+  }
+
+  .records-catalog .exercise-card {
+    grid-template-columns: minmax(0, 1fr) minmax(6em, 8em);
+    gap: var(--lb-space-2) var(--lb-space-3);
+    padding-block: var(--lb-space-4);
+  }
+
+  .records-catalog .exercise-record {
+    grid-column: 1;
+  }
+
+  .records-catalog .record-actions {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+
+  .records-catalog .record-actions > button {
+    padding-inline: var(--lb-space-2);
+  }
+
+}
+
+@media (max-width: 639px) {
+  .records-catalog .exercise-card > h3 {
+    font-size: 1.375rem;
+  }
+
+  .records-catalog .record-value {
+    font-size: 2.25rem;
+  }
+
+  .records-footer {
+    margin-top: var(--lb-space-6);
+  }
+}
+
+/* Les unités em laissent aussi les actions revenir à la ligne avec du texte agrandi. */
+@container records (max-width: 18em) {
+  .records-catalog .exercise-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .records-catalog .record-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: start;
+  }
+
+  .records-catalog .record-actions > button {
+    width: auto;
+    max-width: 100%;
+    min-inline-size: min(100%, 9em);
+  }
+}

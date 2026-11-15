@@ -8,6 +8,7 @@ import SectionIcon from './SectionIcon'
 import WorkoutConfirmation from './WorkoutConfirmation'
 import WorkoutDetail from './WorkoutDetail'
 import WorkoutQuickNotes from './WorkoutQuickNotes'
+import './WorkoutHistory.css'
 
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 export type HistoryView = { workoutId: string | null; notes: boolean }
@@ -79,7 +80,7 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   }
 
   return (
-    <div className="workout-sessions workout-history">
+    <div className={`workout-sessions workout-history${!selectedId && !view.notes ? ' workout-history-list' : ''}`}>
       {notesWorkout && (view.notes || pendingNotes) && (
         <div ref={notesPanel} hidden={!view.notes}>
           <WorkoutQuickNotes key={notesWorkout.id} workout={notesWorkout} headingId={view.notes ? 'history-page-title' : 'history-notes-page-title'}
@@ -90,9 +91,11 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
       {!view.notes && (
         <>
           {selectedId && <button className="record-button workout-back" type="button" onClick={returnToList}><span aria-hidden="true">←</span> Retour à l’historique</button>}
-          <div className="page-heading">
+          <div className={`page-heading${!selectedId ? ' forge-heading' : ''}`}>
+            {!selectedId && <p className="forge-kicker">Journal / Entraînements</p>}
             <h1 id="history-page-title" ref={heading} tabIndex={-1}>{selected?.title ?? 'Historique'}</h1>
             {selected && <p><time dateTime={selected.date}>{formatWorkoutDate(selected.date)}</time> · <span className="workout-status workout-execution-completed">✓ Terminée</span></p>}
+            {!selectedId && <p>Retrouvez vos séances terminées et leurs performances enregistrées.</p>}
           </div>
           {error && <p className="record-error" role="alert">{error}</p>}
           {notesWorkout && pendingNotes && <div className="workout-resume">
@@ -116,7 +119,6 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
             <p className="record-error" role="alert">Cette séance a été réouverte ou supprimée ailleurs. Revenez à la liste pour consulter les séances actuelles.</p>
           ) : (
             <>
-              <p className="records-storage-note">Date de séance renseignée lors de la préparation. Données conservées uniquement dans ce navigateur, sur cet appareil.</p>
               {completed.length === 0 ? (
                 <section className="empty-state" aria-labelledby="history-empty-title">
                   <span className="empty-state-icon"><SectionIcon name="history" /></span>
@@ -125,7 +127,10 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
                 </section>
               ) : (
                 <>
-                  <section className="workout-details workout-history-filters" aria-label="Filtres de l’historique">
+                  <section className="workout-history-filters" aria-label="Filtres de l’historique">
+                    <div className="history-section-heading">
+                      <h2>Filtres</h2>
+                    </div>
                     <div className="workout-details-fields">
                       <div className="workout-field">
                         <label htmlFor="history-exercise">Exercice</label>
@@ -143,32 +148,44 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
                     </div>
                     {hasFilters && <button className="record-button" type="button" onClick={() => onFiltersChange({ exerciseId: '', date: '' })}>Réinitialiser les filtres</button>}
                   </section>
-                  <p className="record-hint" role="status">{filtered.length} séance{filtered.length > 1 ? 's' : ''} affichée{filtered.length > 1 ? 's' : ''}</p>
+                  <div className="history-section-heading history-completed-heading">
+                    <h2>Séances terminées</h2>
+                    <p className="record-hint" role="status">{filtered.length} séance{filtered.length > 1 ? 's' : ''}</p>
+                  </div>
                   {filtered.length === 0 ? (
                     <section className="empty-state" aria-labelledby="history-filter-empty-title">
                       <h2 id="history-filter-empty-title">Aucune séance ne correspond à ces filtres.</h2>
                       <button className="record-button" type="button" onClick={() => onFiltersChange({ exerciseId: '', date: '' })}>Effacer les filtres</button>
                     </section>
                   ) : (
-                    <ul className="workout-session-list">
+                    <>
+                      <div className="history-column-headings" aria-hidden="true">
+                        <span>Séance</span><span>Séries effectuées</span><span>Action</span>
+                      </div>
+                      <ul className="workout-session-list history-journal">
                       {filtered.map((workout) => {
                         const progress = getWorkoutProgress(workout)
                         return <li key={workout.id}>
-                          <article className="workout-details" aria-labelledby={`history-card-${workout.id}`}>
-                            <div className="workout-block-heading">
+                          <article className="workout-details history-row" aria-labelledby={`history-card-${workout.id}`}>
+                            <div className="history-row-heading">
                               <h2 id={`history-card-${workout.id}`}>{workout.title}</h2>
-                              <span className="workout-status workout-execution-completed">✓ Terminée</span>
+                              <p className="record-hint"><time dateTime={workout.date}>{formatWorkoutDate(workout.date)}</time> · {workout.exercises.length} exercice{workout.exercises.length > 1 ? 's' : ''}</p>
                             </div>
-                            <p className="record-hint"><time dateTime={workout.date}>{formatWorkoutDate(workout.date)}</time> · {workout.exercises.length} exercice{workout.exercises.length > 1 ? 's' : ''}</p>
-                            <p>{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total}</p>
-                            <button className="record-button workout-consult" type="button" aria-label={`Consulter la séance : ${workout.title}`} onClick={() => openWorkout(workout.id)}>Consulter la séance</button>
+                            <p className="history-row-progress">
+                              <span className="history-progress-label">Séries effectuées : </span>
+                              <strong>{progress.completed} / {progress.total}</strong>{' '}
+                              <span>série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''}</span>
+                            </p>
+                            <button className="record-button workout-consult" type="button" aria-label={`Consulter la séance : ${workout.title}`} onClick={() => openWorkout(workout.id)}>Consulter</button>
                           </article>
                         </li>
                       })}
-                    </ul>
+                      </ul>
+                    </>
                   )}
                 </>
               )}
+              <p className="records-storage-note history-storage-note">Les données sont conservées uniquement dans ce navigateur, sur cet appareil. La date affichée est celle choisie lors de la préparation.</p>
             </>
           )}
         </>

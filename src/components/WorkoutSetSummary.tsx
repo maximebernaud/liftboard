@@ -18,7 +18,7 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
   const titleId = `summary-${workoutStatus}-${set.id}`
 
   return (
-    <li className="workout-set-summary" aria-labelledby={titleId}>
+    <li className={`workout-set-summary${execution ? '' : ' workout-set-summary-unstarted'}`} aria-labelledby={titleId}>
       <div className="workout-block-heading">
         <h3 id={titleId}>Série {number}</h3>
         <span className={`workout-status${invalid ? ' record-error' : execution?.completed ? ' workout-execution-completed' : ''}`}>{status}</span>
@@ -26,7 +26,7 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
       <div className="workout-set-comparison">
         <div className="workout-comparison-group">
           <p className="workout-label">PRÉVU</p>
-          <p className="workout-comparison-load workout-comparison-planned">{set.load ? `${executionNumberInput(set.load.selectedKg)} kg` : 'Non renseignée'}</p>
+          <p className="workout-comparison-load workout-comparison-planned">{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : 'Non renseignée'}</p>
           <p>{set.reps} répétition{set.reps > 1 ? 's' : ''}</p>
           <p>{executionNumberInput(set.intensityPct)} % du 1RM</p>
           {set.rounding.mode !== 'exact' && <p className="record-hint">{roundingLabel(set.rounding)}</p>}
@@ -35,7 +35,7 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
         <div className="workout-comparison-group">
           <p className="workout-label">SOULEVÉ</p>
           {execution ? <>
-            <p className="workout-comparison-load">{execution.loadKg === null ? 'Non renseignée' : `${executionNumberInput(execution.loadKg)} kg`}</p>
+            <p className="workout-comparison-load">{execution.loadKg === null ? 'Non renseignée' : <>{executionNumberInput(execution.loadKg)} <span>kg</span></>}</p>
             <p>{execution.reps === null ? 'Répétitions non renseignées' : `${executionNumberInput(execution.reps)} répétition${execution.reps > 1 ? 's' : ''}`}</p>
             {!execution.completed && <p className="record-hint">Saisie conservée, non confirmée comme effectuée.</p>}
           </> : <p>{workoutStatus === 'planned' ? 'Aucun résultat enregistré' : 'Non effectuée'}</p>}

@@ -13,7 +13,10 @@ function Header() {
               />
             </svg>
           </span>
-          <p className="brand-name">LiftBoard</p>
+          <div>
+            <p className="brand-name">LiftBoard</p>
+            <p className="brand-discipline">Haltérophilie</p>
+          </div>
         </div>
       </div>
     </header>

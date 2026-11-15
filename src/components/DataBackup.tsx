@@ -64,7 +64,7 @@ export default function DataBackup({ restoreBlocked, notice, onNoticeChange, onR
   const summary = preview ? backupSummary(preview.backup) : null
   return (
     <section className="data-backup" aria-labelledby="data-backup-title" aria-busy={reading}>
-      <h2 id="data-backup-title">Sauvegarder mes entraînements</h2>
+      <h2 id="data-backup-title">Vos données</h2>
       <p className="record-hint">Télécharge une copie de tes records, séances et notes pour les retrouver si tu changes d'appareil ou de navigateur.</p>
       <div className="data-backup-actions">
         <button className="record-button" type="button" onClick={exportCurrent}>Télécharger ma sauvegarde</button>

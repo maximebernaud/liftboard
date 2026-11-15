@@ -8,6 +8,7 @@ type ExerciseCardProps = {
   record?: PersonalRecord
   storageUnavailable: boolean
   isEditing: boolean
+  isActive: boolean
   onStartEditing: () => void
   onStopEditing: () => void
   onDirtyChange: (draft: RecordEditDraft | null) => void
@@ -24,6 +25,7 @@ function ExerciseCard({
   record,
   storageUnavailable,
   isEditing,
+  isActive,
   onStartEditing,
   onStopEditing,
   onDirtyChange,
@@ -36,14 +38,30 @@ function ExerciseCard({
   const [validationError, setValidationError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [editorExpanded, setEditorExpanded] = useState(false)
+  const editorDialog = useRef<HTMLDialogElement>(null)
   const editButton = useRef<HTMLButtonElement>(null)
   const deleteButton = useRef<HTMLButtonElement>(null)
   const cancelDeleteButton = useRef<HTMLButtonElement>(null)
   const deleteDialog = useRef<HTMLDialogElement>(null)
   const restoreEditFocus = useRef(false)
-  const { id, name, category } = exercise
+  const { id, name } = exercise
   const inputId = `record-${id}`
   const formattedRecord = record?.oneRepMaxKg.toString().replace('.', ',')
+
+  // Masquer le dialogue conserve le brouillon monté et sa référence de conflit.
+  useEffect(() => {
+    const dialog = editorDialog.current
+    if (isEditing && isActive && editorExpanded) {
+      dialog?.showModal()
+      if (dialog) dialog.scrollTop = 0
+      dialog?.querySelector('input')?.focus({ preventScroll: true })
+    } else {
+      deleteDialog.current?.close()
+      dialog?.close()
+    }
+    return () => { dialog?.close() }
+  }, [isEditing, isActive, editorExpanded])
 
   // Le bouton revient dans le DOM après la fermeture de l'éditeur.
   useEffect(() => {
@@ -54,6 +72,8 @@ function ExerciseCard({
   }, [isEditing])
 
   function startEditing() {
+    setEditorExpanded(true)
+    if (isEditing) return
     setDraft(formattedRecord ?? '')
     setInitialDraft(formattedRecord ?? '')
     // Cette référence reste stable, même si les props changent après un événement storage.
@@ -64,11 +84,18 @@ function ExerciseCard({
   }
 
   function stopEditing() {
+    setEditorExpanded(false)
     setDraft('')
     setValidationError(null)
     setSaveError(null)
     restoreEditFocus.current = true
     onStopEditing()
+  }
+
+  function suspendEditing() {
+    editorDialog.current?.close()
+    setEditorExpanded(false)
+    editButton.current?.focus({ preventScroll: true })
   }
 
   function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
@@ -119,78 +146,83 @@ function ExerciseCard({
 
   return (
     <article className="exercise-card" aria-labelledby={`${inputId}-title`}>
-      <p className="exercise-category">{category}</p>
-      <h2 id={`${inputId}-title`}>{name}</h2>
-      {!isEditing && (
-        <>
-          <p className="exercise-record" aria-live="polite" aria-atomic="true">
-            {storageUnavailable ? 'Records indisponibles' : record ? (
-              <span className="record-value">{formattedRecord} <span>kg</span></span>
-            ) : (
-              <><span className="record-indicator" aria-hidden="true" />Record non renseigné</>
-            )}
-          </p>
-          <div className="record-actions">
-            <button
-              ref={editButton}
-              className="record-button"
-              type="button"
-              disabled={storageUnavailable}
-              aria-label={`${record ? 'Modifier le record' : 'Ajouter un record'} : ${name}`}
-              onClick={startEditing}
-            >
-              {record ? 'Modifier le record' : 'Ajouter un record'}
-            </button>
-          </div>
-        </>
-      )}
-      {isEditing && (
-        <form id={`${inputId}-form`} className="record-form" onSubmit={handleSubmit} noValidate>
-          <label htmlFor={inputId}>Record pour {name} (kg)</label>
-          <input
-            id={inputId}
-            name="oneRepMaxKg"
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-            ref={focusInput}
-            value={draft}
-            onChange={(event) => changeDraft(event.target.value)}
-            onKeyDown={(event) => handleNumericArrow(event.nativeEvent, event.currentTarget.value, 'record', changeDraft)}
-            aria-invalid={validationError !== null}
-            aria-describedby={`${inputId}-hint${validationError ? ` ${inputId}-error` : ''}${saveError ? ` ${inputId}-save-error` : ''}`}
-          />
-          <p id={`${inputId}-hint`} className="record-hint">Par exemple : 82,5 ou 82.5.</p>
-          {validationError && (
-            <p id={`${inputId}-error`} className="record-error" role="alert">{validationError}</p>
-          )}
-          {saveError && (
-            <p id={`${inputId}-save-error`} className="record-error" role="alert">{saveError}</p>
-          )}
-          <div className="record-form-actions">
-            <button className="record-button record-button-primary" type="submit">
-              Enregistrer
-            </button>
-            <button className="record-button" type="button" onClick={stopEditing}>
-              Annuler
-            </button>
-          </div>
-          {originalRecord && (
-            <div className="record-delete-action">
-              <button
-                ref={deleteButton}
-                className="record-button record-button-delete"
-                type="button"
-                aria-label={`Effacer ce record : ${name}`}
-                aria-haspopup="dialog"
-                onClick={openDeleteDialog}
-              >
-                Effacer ce record
-              </button>
-            </div>
-          )}
-        </form>
-      )}
+      <h3 id={`${inputId}-title`}>{name}</h3>
+      <p className="exercise-record" aria-live="polite" aria-atomic="true">
+        {storageUnavailable ? 'Records indisponibles' : record ? (
+          <span className="record-value">{formattedRecord} <span>kg</span></span>
+        ) : (
+          <><span className="record-indicator" aria-hidden="true" />Record non renseigné</>
+        )}
+      </p>
+      <div className="record-actions">
+        <button
+          ref={editButton}
+          className="record-button"
+          type="button"
+          disabled={storageUnavailable && !isEditing}
+          aria-label={`${isEditing ? 'Reprendre la saisie' : record ? 'Modifier le record' : 'Ajouter un record'} : ${name}`}
+          aria-haspopup="dialog"
+          onClick={startEditing}
+        >
+          {isEditing ? 'Reprendre la saisie' : record ? 'Modifier' : 'Ajouter un record'}
+        </button>
+      </div>
+      <dialog ref={editorDialog} className="record-dialog record-editor-dialog"
+        aria-labelledby={`${inputId}-editor-title`} aria-describedby={`${inputId}-hint`}
+        onCancel={(event) => { event.preventDefault(); suspendEditing() }}>
+        {isEditing && (
+          <>
+            <p className="record-editor-kicker">{originalRecord ? 'Modifier le record' : 'Ajouter un record'}</p>
+            <h2 id={`${inputId}-editor-title`}>{name}</h2>
+            <form id={`${inputId}-form`} className="record-form" onSubmit={handleSubmit} noValidate>
+              <label htmlFor={inputId}>Record pour {name} (kg)</label>
+              <div className="record-input-unit">
+                <input
+                  id={inputId}
+                  name="oneRepMaxKg"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  ref={focusInput}
+                  value={draft}
+                  onChange={(event) => changeDraft(event.target.value)}
+                  onKeyDown={(event) => handleNumericArrow(event.nativeEvent, event.currentTarget.value, 'record', changeDraft)}
+                  aria-invalid={validationError !== null}
+                  aria-describedby={`${inputId}-hint${validationError ? ` ${inputId}-error` : ''}${saveError ? ` ${inputId}-save-error` : ''}`}
+                />
+                <span aria-hidden="true">kg</span>
+              </div>
+              <p id={`${inputId}-hint`} className="record-hint">Par exemple : 82,5 ou 82.5.</p>
+              {validationError && (
+                <p id={`${inputId}-error`} className="record-error" role="alert">{validationError}</p>
+              )}
+              {saveError && (
+                <p id={`${inputId}-save-error`} className="record-error" role="alert">{saveError}</p>
+              )}
+              <div className="record-form-actions">
+                <button className="record-button" type="button" onClick={stopEditing}>Annuler</button>
+                <button className="record-button record-button-primary" type="submit">Enregistrer</button>
+              </div>
+              <button className="record-button record-suspend" type="button" onClick={suspendEditing}>Reprendre plus tard</button>
+              <p className="record-hint">Entrée : enregistrer · Échap : conserver la saisie pour plus tard.</p>
+              {originalRecord && (
+                <div className="record-delete-action">
+                  <button
+                    ref={deleteButton}
+                    className="record-button record-button-delete"
+                    type="button"
+                    aria-label={`Effacer ce record : ${name}`}
+                    aria-haspopup="dialog"
+                    onClick={openDeleteDialog}
+                  >
+                    Effacer ce record
+                  </button>
+                </div>
+              )}
+            </form>
+          </>
+        )}
+      </dialog>
       <dialog
         ref={deleteDialog}
         className="record-dialog"
@@ -198,7 +230,7 @@ function ExerciseCard({
         aria-describedby={`${inputId}-dialog-description`}
         onClose={() => {
           setDeleteError(null)
-          deleteButton.current?.focus({ preventScroll: true })
+          if (isActive && isEditing) deleteButton.current?.focus({ preventScroll: true })
         }}
       >
         <h3 id={`${inputId}-dialog-title`}>Effacer ce record ?</h3>

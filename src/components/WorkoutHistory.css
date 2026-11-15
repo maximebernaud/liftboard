@@ -1,0 +1,201 @@
+/* La liste seule adopte Forge Noire 2.0 : détail et notes gardent leurs styles. */
+.workout-history-list {
+  max-width: none;
+  container: history / inline-size;
+}
+
+.workout-history-list .history-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lb-space-4);
+  padding-bottom: var(--lb-space-4);
+  border-bottom: var(--lb-border-width) solid var(--lb-color-border);
+}
+
+.workout-history-list .history-section-heading h2,
+.workout-history-list .history-column-headings {
+  color: var(--lb-color-accent);
+  font-family: var(--lb-font-body);
+  font-size: var(--lb-text-xs);
+  font-weight: 600;
+  line-height: var(--lb-leading-xs);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.workout-history-list .history-section-heading > p {
+  max-width: 45%;
+  margin-inline-start: auto;
+  font-size: var(--lb-text-xs);
+  line-height: var(--lb-leading-xs);
+  text-align: end;
+}
+
+.workout-history-list .workout-history-filters {
+  display: grid;
+  gap: var(--lb-space-6);
+  margin-bottom: var(--lb-space-8);
+}
+
+.workout-history-list .workout-history-filters .workout-details-fields {
+  width: 100%;
+  max-width: 48rem;
+  gap: var(--lb-space-5);
+}
+
+.workout-history-list .workout-history-filters label {
+  font-size: var(--lb-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.workout-history-list .workout-history-filters :is(input, select) {
+  border-radius: calc(var(--lb-radius-sm) / 2);
+  background: var(--lb-color-surface);
+}
+
+.workout-history-list .workout-history-filters > .record-button {
+  justify-self: start;
+  border-color: transparent;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: var(--lb-space-1);
+}
+
+.workout-history-list .history-column-headings {
+  display: none;
+  color: var(--lb-color-text-muted);
+}
+
+.workout-history-list .history-journal {
+  gap: 0;
+}
+
+.workout-history-list .history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "title title" "meta meta" "progress action";
+  align-items: center;
+  gap: var(--lb-space-3) var(--lb-space-4);
+  padding: var(--lb-space-6) 0;
+  border: 0;
+  border-bottom: var(--lb-border-width) solid var(--lb-color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.workout-history-list .history-row-heading {
+  display: contents;
+  min-width: 0;
+}
+
+.workout-history-list .history-row h2 {
+  grid-area: title;
+  font-size: var(--lb-text-xl);
+  font-weight: 700;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.workout-history-list .history-row-heading .record-hint,
+.workout-history-list .history-row-progress > span {
+  font-size: var(--lb-text-xs);
+  line-height: var(--lb-leading-xs);
+}
+
+.workout-history-list .history-row-heading .record-hint {
+  grid-area: meta;
+}
+
+.workout-history-list .history-progress-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.workout-history-list .history-row-progress {
+  grid-area: progress;
+  min-width: 0;
+  color: var(--lb-color-text-muted);
+}
+
+.workout-history-list .history-row-progress strong {
+  color: var(--lb-color-text);
+  font-family: var(--lb-font-display);
+  font-size: var(--lb-text-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.workout-history-list .history-row .workout-consult {
+  grid-area: action;
+  justify-self: end;
+  width: auto;
+  max-width: 100%;
+  border-radius: calc(var(--lb-radius-sm) / 2);
+  font-size: var(--lb-text-sm);
+}
+
+.workout-history-list .history-storage-note {
+  margin-block: var(--lb-space-6) 0;
+  font-size: var(--lb-text-xs);
+  line-height: var(--lb-leading-sm);
+}
+
+.workout-history-list .empty-state {
+  align-items: start;
+  padding: var(--lb-space-8) 0;
+  border-width: 0 0 var(--lb-border-width);
+  border-radius: 0;
+  background: transparent;
+  text-align: start;
+}
+
+@container history (min-width: 44em) {
+  .workout-history-list .history-column-headings,
+  .workout-history-list .history-row {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1.1fr);
+    column-gap: var(--lb-space-6);
+  }
+
+  .workout-history-list .history-column-headings {
+    display: grid;
+    padding-block: var(--lb-space-4) var(--lb-space-3);
+    border-bottom: var(--lb-border-width) solid var(--lb-color-border);
+  }
+
+  .workout-history-list .history-column-headings > :last-child {
+    text-align: end;
+  }
+
+  .workout-history-list .history-row {
+    grid-template-areas: "title progress action";
+  }
+
+  .workout-history-list .history-row-heading {
+    grid-area: title;
+    display: grid;
+    gap: var(--lb-space-2);
+  }
+
+  .workout-history-list .history-row-heading :is(h2, .record-hint) {
+    grid-area: auto;
+  }
+}
+
+@container history (max-width: 18em) {
+  .workout-history-list .history-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "title" "meta" "progress" "action";
+  }
+
+  .workout-history-list .history-row .workout-consult {
+    justify-self: start;
+  }
+}

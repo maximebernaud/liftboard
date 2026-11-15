@@ -52,11 +52,38 @@ const settle = () => evaluate('new Promise(resolve => requestAnimationFrame(() =
 
 async function click(text, scope = 'body') {
   // Conserver les parcours de confirmation manuelle lorsque leur série est repliée.
-  if (text === 'Série réalisée') await openExecutionSet(scope)
+  if (text === 'Série réalisée' || text === 'Fermer l’édition') await openExecutionSet(scope)
+  // Le dialogue Records garde le brouillon monté lorsqu'on le réduit pour naviguer.
+  // Suivre ce parcours visible évite de cliquer artificiellement un contrôle inerte.
+  const recordTransition = await call((text, scope) => {
+    const root = document.querySelector(scope)
+    const controls = [...root.querySelectorAll('button, summary')]
+    const matches = item => item.textContent.trim() === text ||
+      (text === 'Modifier le record' && item.getAttribute('aria-label')?.startsWith('Modifier le record :')) ||
+      (['Modifier le record', 'Ajouter un record'].includes(text) && item.matches('.record-actions button') &&
+        item.getAttribute('aria-label')?.startsWith('Reprendre la saisie :'))
+    const target = controls.find(item => item.getClientRects().length && matches(item)) ?? controls.find(matches)
+    const activeEditor = document.querySelector('.record-editor-dialog[open]')
+    const targetEditor = target?.closest('.record-editor-dialog')
+    return {
+      suspend: Boolean(activeEditor && target && !activeEditor.contains(target) && !target.closest('dialog[open]')),
+      resume: targetEditor && !targetEditor.open ? target.closest('.exercise-grid > li').id : null,
+    }
+  }, text, scope)
+  if (recordTransition.suspend) await click('Reprendre plus tard', '.record-editor-dialog[open]')
+  if (recordTransition.resume) {
+    await call(id => document.querySelector(`#${id} .record-actions button`).click(), recordTransition.resume)
+    await settle()
+  }
   const found = await call((text, scope) => {
     const element = [...document.querySelector(scope).querySelectorAll('button, summary')]
-      .find((item) => item.getClientRects().length && item.textContent.trim() === text)
+      .find((item) => item.getClientRects().length && (item.textContent.trim() === text ||
+        (text === 'Modifier le record' && item.getAttribute('aria-label')?.startsWith('Modifier le record :')) ||
+        (['Modifier le record', 'Ajouter un record'].includes(text) && item.matches('.record-actions button') &&
+          item.getAttribute('aria-label')?.startsWith('Reprendre la saisie :'))))
     if (!element) return false
+    // Le pointeur déplace le focus avant d'ouvrir une confirmation ; .click() seul ne le fait pas.
+    element.focus({ preventScroll: true })
     element.click()
     return true
   }, text, scope)
@@ -66,9 +93,10 @@ async function click(text, scope = 'body') {
 
 async function openExecutionSet(scope) {
   const label = await call(scope => {
-    const form = document.querySelector(scope)
-    return form?.matches('.workout-execution-set-compact')
-      ? form.querySelector('.workout-execution-toggle').textContent.trim() : null
+    const root = document.querySelector(scope)
+    const form = root?.matches('.workout-execution-set') ? root : root?.querySelector('.workout-execution-set:not(.workout-execution-set-compact)')
+    const toggle = form?.querySelector('.workout-execution-toggle:not([hidden])')
+    return toggle?.getClientRects().length ? toggle.textContent.trim() : null
   }, scope)
   if (label) await click(label, scope)
 }
@@ -76,14 +104,17 @@ async function openExecutionSet(scope) {
 // Ouvrir via Ajuster ou Modifier avant de saisir dans une série repliée.
 async function revealExecutionField(selector) {
   const formId = await call(selector => {
-    const form = document.querySelector(selector)?.closest('.workout-execution-set-compact')
-    return form?.id ?? null
+    const field = document.querySelector(selector)
+    const form = field?.closest('.workout-execution-set')
+    return form && !field.getClientRects().length ? form.id : null
   }, selector)
   if (formId) await openExecutionSet(`#${formId}`)
 }
 
 async function enter(selector, text) {
+  await revealDraftField(selector)
   await revealExecutionField(selector)
+  await revealRecordField(selector)
   await call((selector, text) => {
     const field = document.querySelector(selector)
     if (!field) throw new Error(`Champ introuvable : ${selector}`)
@@ -97,7 +128,34 @@ async function enter(selector, text) {
   await settle()
 }
 
+// Le repli de préparation conserve les champs montés ; passer par leur commande visible.
+async function revealDraftField(selector) {
+  const setId = await call(selector => {
+    const field = document.querySelector(selector)
+    return field && !field.getClientRects().length ? field.closest('.workout-set')?.querySelector('.workout-set-toggle')?.getAttribute('aria-controls') : null
+  }, selector)
+  if (setId) {
+    await call(id => document.querySelector(`[aria-controls="${id}"]`).click(), setId)
+    await settle()
+  }
+}
+
+async function trackingTitle() {
+  assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi de séance')
+  return call(() => document.querySelector('.workout-heading-context').firstChild.textContent.replace(/ · $/, ''))
+}
+
+async function revealRecordField(selector) {
+  const rowId = await call(selector => {
+    const field = document.querySelector(selector)
+    const editor = field?.closest('.record-editor-dialog')
+    return editor && !editor.open ? field.closest('.exercise-grid > li').id : null
+  }, selector)
+  if (rowId) await click('Reprendre la saisie', `#${rowId} .record-actions`)
+}
+
 async function select(selector, value) {
+  await revealDraftField(selector)
   await call((selector, value) => {
     const field = document.querySelector(selector)
     field.value = value
@@ -107,7 +165,9 @@ async function select(selector, value) {
 }
 
 async function arrow(selector, key, count = 1) {
+  await revealDraftField(selector)
   await revealExecutionField(selector)
+  await revealRecordField(selector)
   await call((selector) => document.querySelector(selector).focus({ preventScroll: true }), selector)
   for (let index = 0; index < count; index++) {
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key === 'ArrowUp' ? 38 : 40, autoRepeat: index > 0 })
@@ -197,7 +257,7 @@ async function chooseBackup(path) {
   await command('DOM.setFileInputFiles', { nodeId, files: [path] })
   for (let attempt = 0; attempt < 80; attempt++) {
     await settle()
-    if (await evaluate('document.querySelector(".data-backup").getAttribute("aria-busy") === "false" && Boolean(document.querySelector(".data-backup dialog[open], .data-backup > .record-error"))')) return
+    if (await evaluate('document.querySelector(".data-backup").getAttribute("aria-busy") === "false" && Boolean(document.querySelector(".data-backup dialog[open]:not(.record-editor-dialog), .data-backup > .record-error"))')) return
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   throw new Error('La sélection de sauvegarde ne se termine pas')
@@ -231,11 +291,16 @@ async function viewport(width, name, screenshot = false, section = 'sessions') {
   if (size.textarea) assert.ok(parseFloat(size.textarea) >= 16)
   if (width >= 960 && section === 'sessions') {
     const centered = await evaluate(`(() => {
-      const panel = [...document.querySelectorAll('.workout-sessions')].find(item => item.getClientRects().length).getBoundingClientRect();
+      const element = [...document.querySelectorAll('.workout-sessions')].find(item => item.getClientRects().length);
+      const panel = element.getBoundingClientRect();
       const main = document.querySelector('main').getBoundingClientRect();
+      if (element.matches('.workout-history-list, .workout-sessions-forge')) {
+        return panel.width <= Math.min(main.width, 1040) + 1 && Math.abs(panel.width - main.width) <= 2 &&
+          Math.abs(panel.left - main.left) <= 2;
+      }
       return panel.width <= 680 && Math.abs((panel.left + panel.right) - (main.left + main.right)) <= 2
     })()`)
-    assert.ok(centered, 'Éditeur centré avec largeur maximale conservée')
+    assert.ok(centered, 'Liste Historique étendue ou éditeur centré avec largeur maximale conservée')
   }
   if (screenshot) {
     const image = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
@@ -311,7 +376,7 @@ try {
     assert.match(await evaluate('document.querySelector(".data-backup dialog").textContent'), /remplacera vos Records et vos séances.*ne peut pas être annulée automatiquement/s)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
     for (const width of [320, 393, 430, 768, 1440]) await viewport(width, 'j7-preview', width === 320)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await snapshotBusiness(), before)
     assert.equal(await evaluate('document.querySelector(".data-backup dialog")'), null)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Récupérer mes données')
@@ -341,14 +406,14 @@ try {
     await click('← Retour aux séances')
     const before = await snapshotBusiness()
     await chooseBackup(j7download.path)
-    await click('Restaurer mes données', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /saisie.*en cours/s)
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) .record-error").textContent'), /saisie.*en cours/s)
     assert.deepEqual(await snapshotBusiness(), before)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Reprendre le brouillon')
     assert.equal(await evaluate('document.querySelector("#workout-title").value'), 'Brouillon à préserver')
     await click('Annuler', '.workout-editor')
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
   })
 
   await check('J7 : la saisie Records masquée est protégée et reste intacte après annulation', async () => {
@@ -358,10 +423,10 @@ try {
     await click('Séances', '.primary-nav')
     const before = await snapshotBusiness()
     await chooseBackup(j7download.path)
-    await click('Restaurer mes données', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /saisie.*en cours/s)
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) .record-error").textContent'), /saisie.*en cours/s)
     assert.deepEqual(await snapshotBusiness(), before)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Records', '.primary-nav')
     assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '999')
     await click('Annuler', '.exercise-card')
@@ -370,7 +435,7 @@ try {
 
   await check('J7 : une note historique non enregistrée et masquée bloque le remplacement', async () => {
     await click('Historique', '.primary-nav')
-    await click('Consulter la séance', '.workout-history')
+    await click('Consulter', '.workout-history')
     await click('Notes', '.workout-history')
     await evaluate(`window.j7setItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
       if (key === 'liftboard.workouts.v1') throw new Error('Denied'); return window.j7setItem.call(this, key, value)
@@ -380,10 +445,10 @@ try {
     await click('Séances', '.primary-nav')
     const before = await snapshotBusiness()
     await chooseBackup(j7download.path)
-    await click('Restaurer mes données', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /saisie.*en cours/s)
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) .record-error").textContent'), /saisie.*en cours/s)
     assert.deepEqual(await snapshotBusiness(), before)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Historique', '.primary-nav')
     await click('Reprendre les notes en attente', '.workout-history')
     assert.equal(await evaluate('document.querySelector(".workout-history textarea").value'), 'J7 : note en attente')
@@ -399,11 +464,11 @@ try {
       if (key === 'liftboard.workouts.v1' && window.j7failOnce) { window.j7failOnce = false; throw new DOMException('Full', 'QuotaExceededError') }
       return window.j7setItem.call(this, key, value)
     }`)
-    await click('Restaurer mes données', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /plein.*rétablies/s)
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) .record-error").textContent'), /plein.*rétablies/s)
     assert.deepEqual(await snapshotBusiness(), before)
     await evaluate('Storage.prototype.setItem = window.j7setItem')
-    await click('Restaurer mes données', 'dialog[open]')
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
     assert.match(await evaluate('document.querySelector(".data-backup [role=status]").textContent'), /restaurées/)
     assert.deepEqual(await storedWorkouts(), j7download.backup.data.workouts)
@@ -424,7 +489,7 @@ try {
     })
     await reload()
     await chooseBackup(j7download.path)
-    await click('Restaurer mes données', 'dialog[open]')
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), [j7planned, j7completed])
     assert.deepEqual(await evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1"))'), j7records)
     assert.equal(await evaluate('localStorage.getItem("j7-unrelated")'), 'Ne pas exporter')
@@ -434,14 +499,14 @@ try {
     const path = join(artifactDirectory, 'empty.json')
     await writeFile(path, JSON.stringify({ ...j7download.backup, data: { records: [], workouts: [] } }))
     await chooseBackup(path)
-    await click('Restaurer mes données', 'dialog[open]')
+    await click('Restaurer mes données', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), [])
     assert.deepEqual(await evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1"))'), [])
     await reload()
   })
 
-  const snatchCard = '.exercise-grid > li:nth-child(1)'
-  const cleanCard = '.exercise-grid > li:nth-child(2)'
+  const snatchCard = '#record-snatch-row'
+  const cleanCard = '#record-clean-and-jerk-row'
   const storedRecords = () => evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1") ?? "[]")')
   const seedRecords = async () => {
     await evaluate('localStorage.setItem("liftboard.personal-records.v1", JSON.stringify([{exerciseId:"snatch",oneRepMaxKg:100},{exerciseId:"clean-and-jerk",oneRepMaxKg:120}]))')
@@ -454,13 +519,13 @@ try {
     await click('Modifier le record', snatchCard)
     assert.equal(await guardActive(), false)
     await click('Modifier le record', cleanCard)
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     await click('Modifier le record', snatchCard)
     await enter('#record-snatch', '95,')
     assert.equal(await guardActive(), true)
     await click('Modifier le record', cleanCard)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer à modifier')
-    await click('Continuer à modifier', 'dialog[open]')
+    await click('Continuer à modifier', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '95,')
     assert.equal(await guardActive(), true)
     await click('Modifier le record', cleanCard)
@@ -477,7 +542,7 @@ try {
     await click('Enregistrer', snatchCard)
     assert.equal(await evaluate('document.querySelector("#record-snatch").getAttribute("aria-invalid")'), 'true')
     await click('Modifier le record', cleanCard)
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '120')
     assert.equal(await guardActive(), false)
     await click('Modifier le record', snatchCard)
@@ -500,7 +565,7 @@ try {
     await click('Séances', '.primary-nav')
   })
 
-  const discardParagraphs = () => evaluate('[...document.querySelectorAll("dialog[open] .record-dialog-description p")].map(p => p.textContent)')
+  const discardParagraphs = () => evaluate('[...document.querySelectorAll("dialog[open]:not(.record-editor-dialog) .record-dialog-description p")].map(p => p.textContent)')
   await check('J8-C UX Records : message exact, boutons explicites, clavier, focus et annulation sans perte', async () => {
     await click('Records', '.primary-nav')
     await click('Modifier le record', snatchCard)
@@ -511,21 +576,21 @@ try {
       document.querySelector(`${scope} button`).focus({ preventScroll: true })
     }, cleanCard)
     await click('Modifier le record', cleanCard)
-    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Modifications non enregistrées')
+    assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Modifications non enregistrées')
     assert.deepEqual(await discardParagraphs(), [
       "Tu as modifié ton Record de Snatch de 100 kg à 95 kg, mais tu ne l'as pas enregistré.",
       'Si tu ouvres Clean & Jerk, ta saisie de 95 kg sera perdue. La valeur actuellement enregistrée ne sera pas modifiée par cet abandon.',
     ])
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("dialog[open] button")].map(b => b.textContent)'), ['Continuer à modifier', 'Abandonner les modifications'])
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("dialog[open]:not(.record-editor-dialog) button")].map(b => b.textContent)'), ['Continuer à modifier', 'Abandonner les modifications'])
     assert.equal(await evaluate(`(() => {
-      const dialog = document.querySelector('dialog[open]');
+      const dialog = document.querySelector('dialog[open]:not(.record-editor-dialog)');
       return document.getElementById(dialog.getAttribute('aria-labelledby')) === dialog.querySelector('h3') &&
         document.getElementById(dialog.getAttribute('aria-describedby')) === dialog.querySelector('.record-dialog-description');
     })()`), true)
     for (const width of [320, 393, 430, 768, 1440]) {
       await viewport(width, 'j8c-record-popup', width === 320 || width === 1440, 'records')
       assert.equal(await evaluate(`(() => {
-        const dialog = document.querySelector('dialog[open]');
+        const dialog = document.querySelector('dialog[open]:not(.record-editor-dialog)');
         return dialog.scrollWidth === dialog.clientWidth && [...dialog.querySelectorAll('button')].every(button => {
           const box = button.getBoundingClientRect();
           return box.width >= 44 && box.height >= 44 && box.left >= 0 && box.right <= innerWidth;
@@ -541,13 +606,13 @@ try {
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
     await settle()
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '95')
     assert.deepEqual(await evaluate('({start: document.querySelector("#record-snatch").selectionStart, end: document.querySelector("#record-snatch").selectionEnd})'), { start: 1, end: 2 })
     assert.equal(await call(scope => document.activeElement === document.querySelector(`${scope} button`), cleanCard), true)
     assert.deepEqual(await storedRecords(), before)
     await click('Modifier le record', cleanCard)
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#record-clean-and-jerk").value'), '120')
     assert.equal(await guardActive(), false)
     assert.deepEqual(await storedRecords(), before)
@@ -555,8 +620,8 @@ try {
   })
 
   await check('J8-C UX Records : premier Record, décimales et destination dynamiques sans ancienne valeur inventée', async () => {
-    const frontCard = '.exercise-grid > li:nth-child(3)'
-    const backCard = '.exercise-grid > li:nth-child(4)'
+    const frontCard = '#record-front-squat-row'
+    const backCard = '#record-back-squat-row'
     const before = await storedRecords()
     await click('Ajouter un record', frontCard)
     await enter('#record-front-squat', '82.5')
@@ -565,18 +630,18 @@ try {
       "Tu as saisi un Record de Front Squat à 82,5 kg, mais tu ne l'as pas enregistré.",
       'Si tu ouvres Back Squat, ta saisie de 82,5 kg sera perdue. Les données actuellement enregistrées ne seront pas modifiées par cet abandon.',
     ])
-    await click('Continuer à modifier', 'dialog[open]')
+    await click('Continuer à modifier', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#record-front-squat").value'), '82.5')
     await enter('#record-front-squat', ' ')
     await click('Ajouter un record', backCard)
     assert.doesNotMatch((await discardParagraphs()).join(' '), /kg/)
-    await click('Continuer à modifier', 'dialog[open]')
+    await click('Continuer à modifier', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#record-front-squat").value'), ' ')
     await enter('#record-front-squat', 'invalide')
     await click('Ajouter un record', backCard)
     assert.match((await discardParagraphs())[0], /« invalide ».*Front Squat.*n'était pas renseigné/)
     assert.doesNotMatch((await discardParagraphs()).join(' '), /kg/)
-    await click('Continuer à modifier', 'dialog[open]')
+    await click('Continuer à modifier', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#record-front-squat").value'), 'invalide')
     await click('Annuler', frontCard)
     assert.deepEqual(await storedRecords(), before)
@@ -593,8 +658,8 @@ try {
       if (input) assert.ok(change.includes(`« ${input} »`))
       else assert.match(change, /vidé le champ/)
       assert.equal(consequence, 'Si tu ouvres Clean & Jerk, ta saisie actuelle sera perdue. La valeur actuellement enregistrée ne sera pas modifiée par cet abandon.')
-      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open] b"))'), false, 'La saisie est du texte, jamais du HTML')
-      await click('Continuer à modifier', 'dialog[open]')
+      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog) b"))'), false, 'La saisie est du texte, jamais du HTML')
+      await click('Continuer à modifier', 'dialog[open]:not(.record-editor-dialog)')
       assert.equal(await evaluate('document.querySelector("#record-snatch").value'), input)
       assert.equal(await guardActive(), true)
       assert.deepEqual(await storedRecords(), before)
@@ -640,7 +705,7 @@ try {
       assert.equal(await evaluate('document.querySelector("#record-snatch").value'), '110')
       await click('Modifier le record', cleanCard)
       assert.equal((await discardParagraphs())[0], "Tu as modifié ton Record de Snatch de 105 kg à 110 kg, mais tu ne l'as pas enregistré.")
-      await click('Continuer à modifier', 'dialog[open]')
+      await click('Continuer à modifier', 'dialog[open]:not(.record-editor-dialog)')
       assert.equal((await storedRecords())[0].oneRepMaxKg, 107.5)
       await click('Enregistrer', snatchCard)
       assert.match(await call(scope => document.querySelector(`${scope} [role=alert]`).textContent, snatchCard), /modifié ailleurs/)
@@ -661,14 +726,14 @@ try {
         await click('Enregistrer', snatchCard)
       })
       await click('Effacer ce record', snatchCard)
-      await click('Effacer le record', 'dialog[open]')
-      assert.match(await evaluate('document.querySelector("dialog[open] [role=alert]").textContent'), /modifié ailleurs/)
+      await click('Effacer le record', 'dialog[open]:not(.record-editor-dialog)')
+      assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) [role=alert]").textContent'), /modifié ailleurs/)
       assert.equal((await storedRecords())[0].oneRepMaxKg, 108)
-      await click('Annuler', 'dialog[open]')
+      await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
       await click('Annuler', snatchCard)
       await click('Modifier le record', snatchCard)
       await click('Effacer ce record', snatchCard)
-      await click('Effacer le record', 'dialog[open]')
+      await click('Effacer le record', 'dialog[open]:not(.record-editor-dialog)')
       assert.deepEqual(await storedRecords(), [{ exerciseId: 'clean-and-jerk', oneRepMaxKg: 125 }])
     })
 
@@ -689,7 +754,7 @@ try {
       await inTab(peer, async () => {
         await click('Modifier le record', snatchCard)
         await click('Effacer ce record', snatchCard)
-        await click('Effacer le record', 'dialog[open]')
+        await click('Effacer le record', 'dialog[open]:not(.record-editor-dialog)')
       })
       await click('Enregistrer', snatchCard)
       assert.match(await call(scope => document.querySelector(`${scope} [role=alert]`).textContent, snatchCard), /modifié ailleurs/)
@@ -780,7 +845,7 @@ try {
     removalDraft = await draftBlocks()
     await click('+ Ajouter un exercice')
     await click('Retirer l’exercice', '.workout-exercise:nth-child(3)')
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await draftBlocks(), removalDraft)
     assert.deepEqual(await storedWorkouts(), [removalWorkout])
     assert.equal(await evaluate('document.activeElement.textContent.trim()'), '+ Ajouter un exercice')
@@ -789,12 +854,12 @@ try {
   await check('J8-D : confirmation lisible, annulation et Échap conservent toutes les séries et le focus', async () => {
     await evaluate('document.querySelector(".workout-exercise .workout-remove").focus({preventScroll:true})')
     await click('Retirer l’exercice', '.workout-exercise:nth-child(1)')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Exercice|exercice 1 : Snatch/)
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /Exercice|exercice 1 : Snatch/)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
     assert.deepEqual(await draftBlocks(), removalDraft)
     assert.deepEqual(await storedWorkouts(), [removalWorkout])
     for (const width of [320, 393, 430, 768, 1440]) await viewport(width, 'j8-remove', width === 320)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await draftBlocks(), removalDraft)
     assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), 'Retirer l’exercice 1 : Snatch et toutes ses séries')
     await click('Retirer l’exercice', '.workout-exercise:nth-child(1)')
@@ -955,10 +1020,10 @@ try {
     assert.equal(await evaluate('document.querySelector("textarea").value'), 'Ancienne édition')
     await click('Annuler', 'form')
     assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
-    await click('Annuler', 'dialog[open]')
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     await click('Annuler', 'form')
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal((await storedWorkouts())[0].notes.during, 'Observation récente')
     assert.equal(await guardActive(), false)
     await click('← Retour aux séances')
@@ -980,11 +1045,11 @@ try {
     await click('Pendant')
     assert.equal(await evaluate('document.querySelector("textarea").value'), 'Saisie non enregistrée\n')
     await click('← Retour aux séances')
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), true)
-    await click('Annuler', 'dialog[open]')
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), true)
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Records', '.primary-nav')
     await click('Séances', '.primary-nav')
-    await click('Continuer ma saisie', 'dialog[open]')
+    await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("textarea").value'), 'Saisie non enregistrée\n')
     await evaluate('Storage.prototype.setItem = window.originalSetItem')
     await click('Réessayer')
@@ -1031,23 +1096,23 @@ try {
     for (const width of [320, 393, 430]) await viewport(width, 'detail')
     await click('Supprimer la séance')
     for (const width of [320, 393, 430]) await viewport(width, 'confirmation', width === 320)
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Technique A finale/)
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /Technique A finale/)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
-    assert.equal(await evaluate('Boolean(document.activeElement.closest("dialog[open]"))'), true)
+    assert.equal(await evaluate('Boolean(document.activeElement.closest("dialog[open]:not(.record-editor-dialog)"))'), true)
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await settle()
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await storedWorkouts(), all)
     await click('Supprimer la séance')
     await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function() { throw new Error('Test write failure') }`)
-    await click('Supprimer la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open] .record-error").textContent'), /Impossible/)
+    await click('Supprimer la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) .record-error").textContent'), /Impossible/)
     assert.deepEqual(await storedWorkouts(), all)
     await evaluate('Storage.prototype.setItem = window.originalSetItem')
-    await click('Supprimer la séance', 'dialog[open]')
+    await click('Supprimer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), [all[1]])
     assert.ok(before[0].id !== all[1].id)
     assert.equal(await evaluate('JSON.parse(localStorage.getItem("liftboard.personal-records.v1"))[0].oneRepMaxKg'), 100)
@@ -1057,9 +1122,9 @@ try {
     await click('Ouvrir', '.workout-session-list')
     await click('Modifier')
     await click('Ouvrir les Records')
-    await click('Ajouter un record', '.exercise-grid > li:nth-child(3)')
+    await click('Ajouter un record', '#record-front-squat-row')
     await enter('#record-front-squat', '100')
-    await click('Enregistrer', '.exercise-grid > li:nth-child(3)')
+    await click('Enregistrer', '#record-front-squat-row')
     await click('← Reprendre ma séance')
     assert.equal(await evaluate('document.querySelector(".workout-load strong").textContent.trim()'), '—')
     await click('Calculer cette charge', '.workout-set')
@@ -1124,9 +1189,9 @@ try {
   await check('flèches des séries et ajout de cinq séries indépendantes, sans perte de focus', async () => {
     const before = await storedWorkouts()
     await click('Records', '.primary-nav')
-    await click('Ajouter un record', '.exercise-grid > li:nth-child(2)')
+    await click('Ajouter un record', '#record-clean-and-jerk-row')
     await enter('#record-clean-and-jerk', '120')
-    await click('Enregistrer', '.exercise-grid > li:nth-child(2)')
+    await click('Enregistrer', '#record-clean-and-jerk-row')
     await click('Séances', '.primary-nav')
     await click('+ Nouvelle séance')
     await enter('#workout-title', 'Séries identiques')
@@ -1177,7 +1242,7 @@ try {
     assert.equal(handledSelect, false)
     assert.deepEqual(await storedWorkouts(), before)
     await click('Annuler', 'form')
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
   })
 
   await check('ajout en édition : charges historiques intactes, nouvelle série au Record actuel', async () => {
@@ -1203,21 +1268,21 @@ try {
   await check('duplication : garde du brouillon, notes de préparation, nouveaux IDs et recalcul', async () => {
     const [source] = await storedWorkouts()
     await click('Records', '.primary-nav')
-    await click('Modifier le record', '.exercise-grid > li:nth-child(3)')
+    await click('Modifier le record', '#record-front-squat-row')
     await enter('#record-front-squat', '120')
-    await click('Enregistrer', '.exercise-grid > li:nth-child(3)')
+    await click('Enregistrer', '#record-front-squat-row')
     await click('Séances', '.primary-nav')
     for (const width of [320, 393, 430, 768, 1440]) await viewport(width, 'cards-with-duplicate', width === 320 || width === 1440)
     await click('+ Nouvelle séance')
     await enter('#workout-title', 'Travail à conserver')
     await click('← Retour aux séances')
     await click('Dupliquer', '.workout-session-list')
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Reprendre le brouillon')
     assert.equal(await evaluate('document.querySelector("#workout-title").value'), 'Travail à conserver')
     await click('← Retour aux séances')
     await click('Dupliquer', '.workout-session-list')
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#workout-title").value'), `${source.title} — copie`)
     const dateIsToday = await evaluate(`(() => { const today = new Date(); const date = [today.getFullYear(), String(today.getMonth()+1).padStart(2,'0'), String(today.getDate()).padStart(2,'0')].join('-');
       return document.querySelector('#workout-date').value === date })()`)
@@ -1255,16 +1320,16 @@ try {
     assert.deepEqual(await storedWorkouts(), saved)
     await click('Dupliquer', '.workout-session-list')
     await click('Annuler', 'form')
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), saved)
   })
 
   await check('duplication sans record : absence explicite, source intacte et sauvegarde possible', async () => {
     const before = await storedWorkouts()
     await click('Records', '.primary-nav')
-    await click('Modifier le record', '.exercise-grid > li:nth-child(3)')
-    await click('Effacer ce record', '.exercise-grid > li:nth-child(3)')
-    await click('Effacer le record', '.exercise-grid > li:nth-child(3) dialog[open]')
+    await click('Modifier le record', '#record-front-squat-row')
+    await click('Effacer ce record', '#record-front-squat-row')
+    await click('Effacer le record', '#record-front-squat-row dialog[open]:not(.record-editor-dialog)')
     await click('Séances', '.primary-nav')
     await click('Dupliquer', '.workout-session-list')
     assert.ok((await evaluate('[...document.querySelectorAll(".workout-load strong")].map(item => item.textContent.trim())')).every(load => load === '—'))
@@ -1350,7 +1415,7 @@ try {
     assert.equal(await call(scope => document.querySelector(scope) === window.compactForm && document.querySelector(scope).querySelector('input') === window.compactInput, compactScope), true)
     assert.deepEqual(await executionAt(0), { completed: true, reps: 2, loadKg: 77.5 })
     assert.equal((await storedWorkouts())[0].status, 'planned')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 5 séries réalisées')
     assert.equal(await call(scope => {
       const button = document.querySelector(scope).querySelector('.workout-execution-toggle')
       return button.type === 'button' && button.getAttribute('aria-expanded') === 'false' &&
@@ -1359,6 +1424,13 @@ try {
     }, compactScope), true)
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), 'Confirmer tel que prévu : série 2')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    assert.equal(await evaluate('document.activeElement.textContent'), 'Ajuster')
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await settle()
     assert.equal(await evaluate('document.activeElement.id'), 'execution-j6-set-1-reps')
   })
 
@@ -1416,7 +1488,7 @@ try {
     assert.equal((await compactState()).compact, true)
     assert.equal((await compactState()).toggleFocused, true)
     assert.equal(await guardActive(), false)
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 5 séries réalisées')
     assert.deepEqual((await storedWorkouts())[0].exercises[0].sets[0].load, compactSource.exercises[0].sets[0].load)
   })
 
@@ -1450,10 +1522,10 @@ try {
     assert.equal((await compactState()).compact, false)
     assert.equal((await compactState()).visibleInputs, 2)
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 / 5 séries réalisées')
     await click('Série réalisée', compactScope)
     assert.equal((await compactState()).compact, true)
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 5 séries réalisées')
   })
 
   for (const failure of ['quota', 'denied']) {
@@ -1496,15 +1568,15 @@ try {
     await click('← Retour au suivi')
     await click('Calculer', '.primary-nav')
     await click('Séances', '.primary-nav')
-    await click('Continuer ma saisie', 'dialog[open]')
+    await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await call(selector => document.querySelector(selector) === window.compactInput && window.compactInput.value === '77,', executionField(0, 'loadKg')), true)
     assert.equal((await compactState()).compact, false)
     await click('← Retour à la séance')
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await guardActive(), true)
     await click('Terminer la séance')
     assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"] .record-error').textContent), /ne sont pas enregistrées/)
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await storedWorkouts(), [compactSource])
     await click('Rétablir les valeurs enregistrées', compactScope)
     await click('Fermer l’édition', compactScope)
@@ -1573,6 +1645,9 @@ try {
         document.activeElement.blur()
         form.querySelector('.workout-execution-close').hidden = true
         form.scrollIntoView({ block: 'start' })
+        // Les nouvelles hauteurs typographiques peuvent placer le bord à -0,4 px.
+        // Cadrer la capture avec un pixel de marge, sans relâcher l'assertion.
+        window.scrollBy(0, -1)
         return form.getBoundingClientRect().height
       }, compactScope)
       await viewport(width, 'compact-before-reference', true)
@@ -1616,7 +1691,7 @@ try {
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set-summary .workout-comparison-group:last-child")].every(group => group.textContent === "SOULEVÉAucun résultat enregistré")'), true)
     await click('Démarrer le suivi')
     assert.equal(await guardActive(), false)
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 / 5 séries réalisées')
     assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 5)
     assert.deepEqual(await storedWorkouts(), [j6Source])
     for (const width of [320, 393, 430, 768, 1440]) {
@@ -1652,7 +1727,7 @@ try {
     assert.deepEqual(saved.exercises[0].sets[1].load, { exactKg: 80, selectedKg: 80 })
     assert.equal(saved.exercises[0].sets[1].reps, 3)
     assert.equal(saved.status, 'planned')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 / 5 séries réalisées')
     assert.equal(await guardActive(), false)
   })
 
@@ -1671,7 +1746,7 @@ try {
     await click('Ouvrir', '.workout-session-list')
     await click('Reprendre le suivi')
     assert.deepEqual(await storedWorkouts(), before)
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 / 5 séries réalisées')
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(1, 'reps')), '2')
   })
 
@@ -1680,9 +1755,9 @@ try {
     assert.deepEqual(await executionAt(2), { completed: false, reps: 1, loadKg: null })
     assert.equal(await guardActive(), false)
     await reload()
-    assert.match(await evaluate('document.querySelector("#workout-page-title").textContent'), /Suivi · Suivi technique/)
+    assert.equal(await trackingTitle(), 'Suivi technique')
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'reps')), '1')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 / 5 séries réalisées')
   })
 
   await check('J6 : saisie invalide préservée dans les notes et les onglets, sortie protégée', async () => {
@@ -1697,14 +1772,14 @@ try {
     await click('← Retour au suivi')
     await click('Calculer', '.primary-nav')
     await click('Séances', '.primary-nav')
-    await click('Continuer ma saisie', 'dialog[open]')
+    await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'loadKg')), '75,')
     await click('← Retour à la séance')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /seront perdues/)
-    await click('Annuler', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /seront perdues/)
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(2, 'loadKg')), '75,')
     await click('Retour aux séances')
-    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Abandonner la saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await guardActive(), false)
     await click('Ouvrir', '.workout-session-list')
     await click('Reprendre le suivi')
@@ -1727,7 +1802,7 @@ try {
     await click('Annuler l’état réalisé', executionScope(1))
     assert.deepEqual(await executionAt(1), { completed: false, reps: 1, loadKg: 75 })
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(1, 'loadKg')), '75')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 5 séries réalisées')
     await click('Série réalisée', executionScope(1))
   })
 
@@ -1740,7 +1815,7 @@ try {
     assert.match(await call((scope) => document.querySelector(scope).textContent, executionScope(3)), /Non enregistré.*plein/)
     assert.equal(await guardActive(), true)
     await click('← Retour à la séance')
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await evaluate('Storage.prototype.setItem = window.originalSetItem')
     await click('Réessayer', executionScope(3))
     assert.deepEqual(await executionAt(3), { completed: false, reps: null, loadKg: 72.5 })
@@ -1812,7 +1887,7 @@ try {
     const [saved] = await storedWorkouts()
     assert.equal(saved.exercises[1].sets[1].load, null)
     assert.equal(saved.status, 'planned')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '5 séries réalisées sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '5 / 5 séries réalisées')
     for (const width of [320, 393, 430, 768, 1440]) {
       await viewport(width, 'tracking-complete', width === 393)
       const bottom = await evaluate(`(() => {
@@ -1829,9 +1904,9 @@ try {
     const [source] = await storedWorkouts()
     await click('Retour aux séances')
     await click('Records', '.primary-nav')
-    await click('Modifier le record', '.exercise-grid > li:nth-child(1)')
+    await click('Modifier le record', '#record-snatch-row')
     await enter('#record-snatch', '120')
-    await click('Enregistrer', '.exercise-grid > li:nth-child(1)')
+    await click('Enregistrer', '#record-snatch-row')
     await click('Séances', '.primary-nav')
     await click('Dupliquer', '.workout-session-list')
     await click('Enregistrer la séance')
@@ -1843,7 +1918,7 @@ try {
     assert.equal(copy.status, 'planned')
     await click('Ouvrir', `[aria-labelledby="card-${copy.id}"]`)
     await click('Démarrer le suivi')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 5')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 / 5 séries réalisées')
     await click('Retour aux séances')
     await call((id) => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(JSON.parse(localStorage.getItem('liftboard.workouts.v1')).filter(item => item.id === id))), source.id)
     await reload()
@@ -1863,7 +1938,7 @@ try {
     assert.deepEqual(await executionAt(0), { completed: true, reps: 1, loadKg: 60 })
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '90')
     await click('← Retour à la séance')
-    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Abandonner la saisie', 'dialog[open]:not(.record-editor-dialog)')
     await click('Reprendre le suivi')
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '60')
     await click('Retour aux séances')
@@ -1890,7 +1965,7 @@ try {
     assert.equal((await storedWorkouts())[0].exercises[0].sets.some(set => set.id === 'j6-set-0'), false)
     assert.equal(await call((selector) => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
     await click('Retour aux séances')
-    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Abandonner la saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await guardActive(), false)
   })
 
@@ -1912,8 +1987,8 @@ try {
     assert.deepEqual(await executionAt(0), { completed: true, reps: 3, loadKg: 80 })
     const before = await storedWorkouts()
     await reload()
-    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST J6')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 10')
+    assert.equal(await trackingTitle(), 'TEST J6')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 10 séries réalisées')
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '80')
     assert.deepEqual(await storedWorkouts(), before)
     assert.deepEqual(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1"))'), { section: 'sessions', trackingWorkoutId: 'fix-workout' })
@@ -1944,13 +2019,13 @@ try {
     assert.equal(await arrow(executionField(1, 'loadKg'), 'ArrowUp'), '77,')
     assert.equal(await evaluate('window.lastArrowPrevented'), false)
     assert.equal(await guardActive(), true)
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 10')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 10 séries réalisées')
   })
 
   await check('correctifs : F5 protégé, restauration du seul stockage et effacement explicite durable', async () => {
     await reload(true)
     assert.ok(beforeUnloadPrompts >= 1, 'Chrome a demandé confirmation avant de perdre le texte invalide')
-    assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST J6')
+    assert.equal(await trackingTitle(), 'TEST J6')
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(1, 'loadKg')), '')
     assert.equal(await call(selector => document.querySelector(selector).getAttribute('placeholder'), executionField(1, 'loadKg')), null)
     assert.equal(await guardActive(), false)
@@ -2016,7 +2091,7 @@ try {
       assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
       await click('Ouvrir', '.workout-session-list')
       await click('Reprendre le suivi')
-      assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST J6')
+      assert.equal(await trackingTitle(), 'TEST J6')
       assert.deepEqual(await storedWorkouts(), before)
     }
     await click('Retour aux séances')
@@ -2114,13 +2189,13 @@ try {
     await click('Démarrer le suivi')
     await click('Terminer la séance')
     assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"]').textContent), /Aucune performance confirmée/)
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     await click('Série réalisée', executionScope(0))
     await enter(executionField(0, 'loadKg'), '77,')
     const before = await storedWorkouts()
     await click('Terminer la séance')
     assert.match(await call(() => document.querySelector('[aria-label="Clôture de la séance"]').textContent), /ne sont pas enregistrées/)
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await storedWorkouts(), before)
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,')
     await click('Rétablir les valeurs enregistrées', executionScope(0))
@@ -2138,12 +2213,12 @@ try {
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
     await settle()
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /3 séries sur 5.*Les 2 autres séries seront considérées comme non effectuées.*saisies non confirmées sont conservées/s)
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /3 séries sur 5.*Les 2 autres séries seront considérées comme non effectuées.*saisies non confirmées sont conservées/s)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Annuler')
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await settle()
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await storedWorkouts(), before)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Terminer la séance')
   })
@@ -2155,26 +2230,26 @@ try {
       if (key === 'liftboard.workouts.v1') throw new DOMException('Full', 'QuotaExceededError')
       return window.originalSetItem.call(this, key, value)
     }`)
-    await click('Terminer la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /plein/)
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /plein/)
     assert.deepEqual(await storedWorkouts(), before)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
     await evaluate(`Storage.prototype.setItem = function(key, value) {
       if (key === 'liftboard.workouts.v1') throw new Error('Denied')
       return window.originalSetItem.call(this, key, value)
     }`)
-    await click('Terminer la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Impossible d’écrire/)
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /Impossible d’écrire/)
     assert.deepEqual(await storedWorkouts(), before)
     await evaluate('Storage.prototype.setItem = window.originalSetItem')
-    await click('Terminer la séance', 'dialog[open]')
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.deepEqual(await storedWorkouts(), [{ ...before[0], status: 'completed' }])
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Historique J6-B')
     assert.equal(await evaluate('document.querySelector(".workout-notice").textContent'), 'Séance terminée et enregistrée dans l’historique.')
     await click('← Retour à l’historique', historyScope)
     assert.deepEqual(await historyCards(), ['Historique J6-B'])
-    assert.match(await evaluate('document.querySelector(".workout-history .workout-session-list").textContent'), /3 séries réalisées sur 5/)
+    assert.match(await evaluate('document.querySelector(".workout-history .workout-session-list").textContent'), /3 \/ 5 séries réalisées/)
     assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
     assert.deepEqual(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1"))'), { section: 'history', trackingWorkoutId: null })
   })
@@ -2194,7 +2269,7 @@ try {
   })
 
   await check('J6-B : consultation du prévu, réalisé, non confirmé, non réalisé et notes', async () => {
-    await click('Consulter la séance', historyScope)
+    await click('Consulter', historyScope)
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Historique J6-B')
     const rows = await evaluate('[...document.querySelectorAll(".workout-history .workout-detail-sets li")].map(item => item.textContent)')
     assert.match(rows[1], /Effectuée.*PRÉVU.*80 kg.*3 répétitions.*80 % du 1RM.*SOULEVÉ.*77,5 kg.*2 répétitions/s)
@@ -2227,7 +2302,7 @@ try {
     await click('← Retour à la séance', historyScope)
     assert.deepEqual((await storedWorkouts())[0], { ...before, notes: { ...before.notes, after: 'Bilan après clôture\nÀ conserver' } })
     await reload()
-    await click('Consulter la séance', historyScope)
+    await click('Consulter', historyScope)
     assert.match(await evaluate('document.querySelector(".workout-history .workout-note-text:last-child").parentElement.parentElement.textContent'), /Bilan après clôture/)
   })
 
@@ -2245,7 +2320,7 @@ try {
     await click('Reprendre les notes en attente', historyScope)
     assert.equal(await evaluate('document.querySelector(".workout-history textarea").value'), 'Bilan non enregistré')
     await click('← Retour à la séance', historyScope)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), before)
     await evaluate('Storage.prototype.setItem = window.originalSetItem')
     await click('Réessayer', historyScope)
@@ -2264,14 +2339,14 @@ try {
     assert.match(await evaluate('document.querySelector(".workout-history .workout-notes-error").textContent'), /note a changé ailleurs/)
     assert.equal((await storedWorkouts())[0].notes.after, 'Version récente ailleurs')
     await click('← Retour à la séance', historyScope)
-    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Abandonner la saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await guardActive(), false)
   })
 
   await check('J6-B : réouverture annulée puis confirmée, sans perte et avec suivi accessible', async () => {
     const before = (await storedWorkouts())[0]
     await click('Réouvrir la séance', historyScope)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual((await storedWorkouts())[0], before)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
@@ -2280,13 +2355,13 @@ try {
       if (key === 'liftboard.workouts.v1') throw new DOMException('Full', 'QuotaExceededError')
       return window.originalSetItem.call(this, key, value)
     }`)
-    await click('Réouvrir la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /plein/)
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /plein/)
     assert.deepEqual((await storedWorkouts())[0], before)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
     await evaluate('Storage.prototype.setItem = window.originalSetItem')
-    await click('Réouvrir la séance', 'dialog[open]')
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual((await storedWorkouts())[0], { ...before, status: 'planned' })
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), before.title)
@@ -2310,14 +2385,14 @@ try {
       localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
     })
     const before = await storedWorkouts()
-    await click('Terminer la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /performances.*changé/s)
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /performances.*changé/s)
     assert.deepEqual(await storedWorkouts(), before)
     await evaluate('localStorage.setItem("liftboard.workouts.v1", "[]")')
-    await click('Terminer la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /n’existe plus/)
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /n’existe plus/)
     assert.deepEqual(await storedWorkouts(), [])
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await reload()
   })
 
@@ -2338,9 +2413,9 @@ try {
     await enter(executionField(1, 'loadKg'), '77,5')
     await click('Enregistrer la correction', executionScope(1))
     await click('Terminer la séance')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /Vous avez réalisé les 3 séries de cette séance/)
-    assert.doesNotMatch(await evaluate('document.querySelector("dialog[open]").textContent'), /restantes/)
-    await click('Terminer la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /Vous avez réalisé les 3 séries de cette séance/)
+    assert.doesNotMatch(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /restantes/)
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal((await storedWorkouts())[0].status, 'completed')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), legacy.title)
     await click('← Retour à l’historique', historyScope)
@@ -2365,7 +2440,7 @@ try {
     assert.deepEqual(await historyCards(), [a.title, c.title])
     await enter('#history-date', '2026-10-25')
     assert.deepEqual(await historyCards(), [c.title])
-    await click('Consulter la séance', historyScope)
+    await click('Consulter', historyScope)
     await click('← Retour à l’historique', historyScope)
     await click('Records', '.primary-nav')
     await click('Historique', '.primary-nav')
@@ -2385,7 +2460,7 @@ try {
     legacy.exercises[0].sets[0].execution = { completed: true, reps: 0, loadKg: 0 }
     await call(source => localStorage.setItem('liftboard.workouts.v1', JSON.stringify([source])), legacy)
     await reload()
-    await click('Consulter la séance', historyScope)
+    await click('Consulter', historyScope)
     const row = await evaluate('document.querySelector(".workout-history .workout-detail-sets li").textContent')
     assert.match(row, /À corriger.*SOULEVÉ.*0 kg.*0 répétition.*Ancien résultat à corriger/s)
     assert.deepEqual(await storedWorkouts(), [legacy])
@@ -2462,8 +2537,8 @@ try {
     const form = await evaluate('document.querySelector(".workout-execution-set").id')
     await click('Série réalisée', `#${form}`)
     await click('Terminer la séance')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /1 série sur 5.*Les 4 autres séries/s)
-    await click('Terminer la séance', 'dialog[open]')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /1 série sur 5.*Les 4 autres séries/s)
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), before.title)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-history .workout-comparison-planned")].every(load => load.textContent === "82,5 kg")'), true)
     assert.equal(await evaluate('document.querySelector(".workout-history").textContent.includes("110 kg")'), false)
@@ -2488,7 +2563,7 @@ try {
     await click('Historique', '.primary-nav')
     assert.equal(await evaluate('document.querySelector("#history-date").value'), old.date)
     assert.equal(await evaluate('document.querySelector("#history-exercise").value'), 'front-squat')
-    await click('Consulter la séance', historyScope)
+    await click('Consulter', historyScope)
     await click('Notes', historyScope)
     await evaluate(`window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
       if (key === 'liftboard.workouts.v1') throw new Error('Denied')
@@ -2500,14 +2575,14 @@ try {
     await click('Ouvrir', '.workout-session-list')
     await click('Reprendre le suivi')
     await click('Terminer la séance')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /2 séries sur 3\. La dernière série sera considérée comme non effectuée/)
-    assert.doesNotMatch(await evaluate('document.querySelector("dialog[open]").textContent'), /Les 1 séries/)
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /2 séries sur 3\. La dernière série sera considérée comme non effectuée/)
+    assert.doesNotMatch(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /Les 1 séries/)
     const before = await storedWorkouts()
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), before)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
     await click('Terminer la séance')
-    await click('Terminer la séance', 'dialog[open]')
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), planned.title)
     assert.equal(await guardActive(), true)
@@ -2520,7 +2595,7 @@ try {
     assert.equal(await evaluate('document.querySelector(".workout-history textarea").value'), 'Note à préserver malgré la clôture')
     assert.equal(await evaluate('document.activeElement === document.querySelector(".workout-history textarea")'), true)
     await click('← Retour à la séance', historyScope)
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Réessayer', historyScope)
     await click('← Retour à la séance', historyScope)
     assert.equal(await guardActive(), false)
@@ -2567,10 +2642,10 @@ try {
     assert.equal(target.exercises[0].sets.length, 3)
     await select('#history-exercise', 'snatch')
     await enter('#history-date', target.date)
-    await click('Consulter la séance', '[aria-labelledby="history-card-ux-new"]')
+    await click('Consulter', '[aria-labelledby="history-card-ux-new"]')
     const historyValues = await evaluate('[...document.querySelectorAll(".workout-history .workout-set-summary")].slice(0, 2).map(card => card.querySelector(".workout-set-comparison").textContent)')
     await click('Réouvrir la séance', historyScope)
-    await click('Réouvrir la séance', 'dialog[open]')
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
     const after = before.map(workout => workout.id === target.id ? { ...workout, status: 'planned' } : workout)
     assert.deepEqual(await storedWorkouts(), after)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Séances')
@@ -2595,7 +2670,7 @@ try {
     assert.deepEqual(await storedWorkouts(), after)
     await click('Ouvrir', '[aria-labelledby="card-ux-new"]')
     await click('Reprendre le suivi')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 séries réalisées sur 3')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '2 / 3 séries réalisées')
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(0, 'loadKg')), '77,5')
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(1, 'loadKg')), '80')
     assert.equal(await call(selector => document.querySelector(selector).value, executionField(2, 'loadKg')), '')
@@ -2607,7 +2682,7 @@ try {
     await click('Historique', '.primary-nav')
     await select('#history-exercise', '')
     await enter('#history-date', '')
-    await click('Consulter la séance', '[aria-labelledby="history-card-ux-old"]')
+    await click('Consulter', '[aria-labelledby="history-card-ux-old"]')
     await click('Réouvrir la séance', historyScope)
     await call(() => {
       const workouts = JSON.parse(localStorage.getItem('liftboard.workouts.v1'))
@@ -2615,18 +2690,18 @@ try {
       localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
     })
     const before = await storedWorkouts()
-    await click('Réouvrir la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /performances.*changé/s)
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /performances.*changé/s)
     assert.deepEqual(await storedWorkouts(), before)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Ancienne séance')
     await call(() => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(JSON.parse(localStorage.getItem('liftboard.workouts.v1')).filter(workout => workout.id !== 'ux-old'))))
     const remaining = await storedWorkouts()
-    await click('Réouvrir la séance', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /n’existe plus/)
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /n’existe plus/)
     assert.deepEqual(await storedWorkouts(), remaining)
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
-    await click('Annuler', 'dialog[open]')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('← Retour à l’historique', historyScope)
   })
 
@@ -2656,7 +2731,7 @@ try {
 
   async function requestJ10Reopen() {
     await click('Historique', '.primary-nav')
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-b"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-b"]')
     await call(() => {
       window.j10ReopenButton = [...document.querySelectorAll('.workout-history button')]
         .find(button => button.textContent === 'Réouvrir la séance')
@@ -2684,11 +2759,11 @@ try {
     })
     await requestJ10Reopen()
     const navigation = await j10Navigation()
-    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Modifications non enregistrées')
-    assert.match(await evaluate('document.querySelector("dialog[open] .record-dialog-description").textContent'), /TEST A.*TEST B.*données déjà enregistrées resteront conservées/s)
+    assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Modifications non enregistrées')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) .record-dialog-description").textContent'), /TEST A.*TEST B.*données déjà enregistrées resteront conservées/s)
     assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer ma saisie')
     assert.equal(await evaluate(`(() => {
-      const dialog = document.querySelector('dialog[open]')
+      const dialog = document.querySelector('dialog[open]:not(.record-editor-dialog)')
       return document.getElementById(dialog.getAttribute('aria-labelledby')) === dialog.querySelector('h3') &&
         document.getElementById(dialog.getAttribute('aria-describedby')) === dialog.querySelector('.record-dialog-description')
     })()`), true)
@@ -2709,14 +2784,14 @@ try {
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await settle()
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.equal(await evaluate('document.activeElement === window.j10ReopenButton'), true)
     assert.equal(await j10Navigation(), navigation)
     assert.equal(await evaluate('window.j10Writes'), 0)
     assert.deepEqual(await storedWorkouts(), j10Workouts)
     await evaluate('Storage.prototype.setItem = window.j10OriginalSetItem')
     await click('Séances', '.primary-nav')
-    await click('Continuer ma saisie', 'dialog[open]')
+    await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await j10Value(j10Load), '77,5')
     assert.equal(await j10Value(j10Reps), '2')
     assert.equal(await call(selector => window.j10LoadField === document.querySelector(selector), j10Load), true)
@@ -2726,17 +2801,17 @@ try {
     await setupJ10()
     await enter(j10Load, '77,5')
     await requestJ10Reopen()
-    await click('Abandonner et réouvrir TEST B', 'dialog[open]')
+    await click('Abandonner et réouvrir TEST B', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), j10Expected())
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'TEST B')
     assert.equal(await evaluate('document.activeElement.id'), 'main-content')
     assert.equal(await guardActive(), false)
     await click('Historique', '.primary-nav')
     assert.equal(await evaluate('Boolean(document.querySelector("[aria-labelledby=history-card-j10-b]"))'), false)
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-c"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-c"]')
     await click('Réouvrir la séance', historyScope)
-    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
-    await click('Annuler', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Annuler', 'dialog[open]:not(.record-editor-dialog)')
     await click('Séances', '.primary-nav')
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
     await click('Ouvrir', '[aria-labelledby="card-j10-a"]')
@@ -2752,9 +2827,9 @@ try {
       // Le suivi reste monté mais est masqué derrière les notes puis l'Historique.
       await click('Notes de séance', j10Scope)
       await requestJ10Reopen()
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       await click('Séances', '.primary-nav')
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       await click('← Retour au suivi', j10Scope)
       assert.equal(await j10Value(field), value)
       assert.deepEqual(await storedWorkouts(), j10Workouts)
@@ -2779,9 +2854,9 @@ try {
       await click('Après', j10Scope)
       await evaluate('Storage.prototype.setItem = window.j10OriginalSetItem')
       await requestJ10Reopen()
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       await click('Séances', '.primary-nav')
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       await click('Pendant', j10Scope)
       assert.equal(await j10Value(`${j10Scope} textarea`), 'Note Pendant non enregistrée')
       await click('Avant', j10Scope)
@@ -2801,13 +2876,13 @@ try {
     }`)
     await enter(`${j10Scope} textarea`, 'Note temporaire à abandonner')
     await requestJ10Reopen()
-    await click('Abandonner et réouvrir TEST B', 'dialog[open]')
-    assert.match(await evaluate('document.querySelector("dialog[open] [role=alert]").textContent'), /Impossible d’écrire/)
+    await click('Abandonner et réouvrir TEST B', 'dialog[open]:not(.record-editor-dialog)')
+    assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) [role=alert]").textContent'), /Impossible d’écrire/)
     assert.equal(await j10Value(j10Load), '77,5')
     assert.equal(await j10Value(`${j10Scope} textarea`), 'Note temporaire à abandonner')
     assert.deepEqual(await storedWorkouts(), j10Workouts)
     await evaluate('Storage.prototype.setItem = window.j10OriginalSetItem')
-    await click('Abandonner et réouvrir TEST B', 'dialog[open]')
+    await click('Abandonner et réouvrir TEST B', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), j10Expected())
     assert.equal(await guardActive(), false)
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'TEST B')
@@ -2816,8 +2891,8 @@ try {
   await check('J10-B : aucune saisie menacée, confirmation habituelle et reprise inchangées', async () => {
     await setupJ10()
     await requestJ10Reopen()
-    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
-    await click('Réouvrir la séance', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.deepEqual(await storedWorkouts(), j10Expected())
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'TEST B')
     await click('Reprendre le suivi', j10Scope)
@@ -2844,8 +2919,8 @@ try {
           return window.j10OriginalSetItem.call(this, key, value)
         }
       }, failure)
-      await click('Abandonner et réouvrir TEST B', 'dialog[open]')
-      assert.match(await evaluate('document.querySelector("dialog[open] [role=alert]").textContent'),
+      await click('Abandonner et réouvrir TEST B', 'dialog[open]:not(.record-editor-dialog)')
+      assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) [role=alert]").textContent'),
         failure === 'quota' ? /plein/ : failure === 'read' ? /Impossible de lire/ : failure === 'corrupt' ? /illisibles/ : /Impossible d’écrire/)
       assert.equal(await j10Navigation(), navigation)
       assert.equal(await j10Value(j10Load), '77,5')
@@ -2855,9 +2930,9 @@ try {
       assert.equal(raw, failure === 'corrupt' ? '{corrompu J10' : JSON.stringify(j10Workouts))
       await evaluate('Storage.prototype.getItem = window.j10OriginalGetItem; Storage.prototype.setItem = window.j10OriginalSetItem')
       if (failure === 'corrupt') await call(workouts => localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts)), j10Workouts)
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       await click('Séances', '.primary-nav')
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       assert.equal(await j10Value(j10Load), '77,5')
       assert.equal(await guardActive(), true)
       assert.deepEqual(await storedWorkouts(), j10Workouts)
@@ -2869,8 +2944,8 @@ try {
     await enter(j10Load, '77,5')
     await click('Enregistrer la correction', j10Scope)
     await requestJ10Reopen()
-    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
-    await click('Réouvrir la séance', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal((await storedWorkouts())[0].exercises[0].sets[0].execution.loadKg, 77.5)
     assert.equal(await guardActive(), false)
   })
@@ -2881,14 +2956,14 @@ try {
     await click('+ Nouvelle séance', j10Scope)
     await enter('#workout-title', 'Brouillon à garder')
     await requestJ10Reopen()
-    assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Réouvrir cette séance ?')
-    await click('Réouvrir la séance', 'dialog[open]')
+    assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Réouvrir cette séance ?')
+    await click('Réouvrir la séance', 'dialog[open]:not(.record-editor-dialog)')
     await click('← Retour aux séances', j10Scope)
     await click('Reprendre le brouillon', j10Scope)
     assert.equal(await j10Value('#workout-title'), 'Brouillon à garder')
     assert.deepEqual(await storedWorkouts(), j10Expected())
     await click('Annuler', j10Scope)
-    await click('Abandonner les modifications', 'dialog[open]')
+    await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
   })
 
   // J10-C : seuls les clics explicites sur la navigation principale visent les listes.
@@ -2898,7 +2973,7 @@ try {
       await click(section, '.primary-nav')
       await click('Séances', '.primary-nav')
       assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
-      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
       assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set").length'), 0)
       assert.deepEqual(await evaluate('JSON.parse(sessionStorage.getItem("liftboard.navigation.v1"))'), { section: 'sessions', trackingWorkoutId: null })
       await click('Ouvrir', '[aria-labelledby="card-j10-a"]')
@@ -2913,7 +2988,7 @@ try {
   await check('J10-C : clôture vers le détail, puis Historique vers la liste avec filtres conservés', async () => {
     await setupJ10()
     await click('Terminer la séance', j10Scope)
-    await click('Terminer la séance', 'dialog[open]')
+    await click('Terminer la séance', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await evaluate('document.querySelector(".primary-nav [aria-current=page]").textContent.trim()'), 'Historique')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'TEST A')
     const completed = j10Workouts.map(workout => workout.id === 'j10-a' ? { ...workout, status: 'completed' } : workout)
@@ -2924,7 +2999,7 @@ try {
     assert.deepEqual(await historyCards(), ['TEST A', 'TEST B', 'TEST C'])
     await select('#history-exercise', 'snatch')
     await enter('#history-date', '2026-11-06')
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-b"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-b"]')
     await click('Historique', '.primary-nav')
     await click('Historique', '.primary-nav')
     assert.deepEqual(await historyCards(), ['TEST A', 'TEST B', 'TEST C'])
@@ -2932,7 +3007,7 @@ try {
     assert.equal(await evaluate('document.querySelector("#history-date").value'), '2026-11-06')
     assert.equal(await evaluate('document.activeElement.id'), 'history-page-title')
     for (const width of [320, 393, 768, 1440]) await viewport(width, 'j10c-history-list', false, 'history')
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-b"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-b"]')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'TEST B')
     assert.deepEqual(await storedWorkouts(), completed)
   })
@@ -2947,8 +3022,8 @@ try {
       await call(() => [...document.querySelectorAll('.primary-nav button')].find(button => button.textContent.trim() === 'Séances').focus())
       await click('Séances', '.primary-nav')
       assert.equal(await j10Navigation(), navigation, 'Aucune transition avant le choix')
-      assert.equal(await evaluate('document.querySelector("dialog[open] h3").textContent'), 'Modifications non enregistrées')
-      assert.match(await evaluate('document.querySelector("dialog[open]").textContent'), /TEST A.*données déjà enregistrées seront conservées/s)
+      assert.equal(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog) h3").textContent'), 'Modifications non enregistrées')
+      assert.match(await evaluate('document.querySelector("dialog[open]:not(.record-editor-dialog)").textContent'), /TEST A.*données déjà enregistrées seront conservées/s)
       assert.equal(await evaluate('document.activeElement.textContent'), 'Continuer ma saisie')
       assert.deepEqual(await storedWorkouts(), j10Workouts)
       if (section === 'Records') {
@@ -2958,11 +3033,11 @@ try {
       await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
       await settle()
       assert.equal(await j10Value(j10Load), '77,5')
-      assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Suivi · TEST A')
+      assert.equal(await trackingTitle(), 'TEST A')
       assert.equal(await evaluate('document.activeElement.closest(".primary-nav") !== null && document.activeElement.textContent.trim() === "Séances"'), true)
       assert.equal(await call(selector => window.j10cField === document.querySelector(selector), j10Load), true)
       await click('Séances', '.primary-nav')
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       assert.equal(await j10Value(j10Load), '77,5')
       await click('Séances', '.primary-nav')
       await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
@@ -3002,7 +3077,7 @@ try {
       const navigation = await j10Navigation()
       await click('Séances', '.primary-nav')
       assert.equal(await j10Navigation(), navigation)
-      await click('Continuer ma saisie', 'dialog[open]')
+      await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
       assert.equal(await j10Value(j10Load), '77,5')
       await click('Pendant', j10Scope)
       assert.equal(await j10Value(`${j10Scope} textarea`), 'Note Pendant à garder')
@@ -3010,7 +3085,7 @@ try {
       assert.equal(await j10Value(`${j10Scope} textarea`), 'Note Avant à garder')
       assert.deepEqual(await storedWorkouts(), j10Workouts)
       await click('Séances', '.primary-nav')
-      await click('Abandonner et afficher Mes séances', 'dialog[open]')
+      await click('Abandonner et afficher Mes séances', 'dialog[open]:not(.record-editor-dialog)')
       assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
       assert.equal(await guardActive(), false)
       assert.deepEqual(await storedWorkouts(), j10Workouts)
@@ -3022,7 +3097,7 @@ try {
     await click('Historique', '.primary-nav')
     await select('#history-exercise', 'snatch')
     await enter('#history-date', '2026-11-06')
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-b"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-b"]')
     await click('Notes', historyScope)
     await evaluate(`window.j10cSet = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
       if (key === 'liftboard.workouts.v1') throw new Error('Test J10-C')
@@ -3036,11 +3111,11 @@ try {
     await click('Calculer', '.primary-nav')
     await click('Historique', '.primary-nav')
     assert.equal(await evaluate('document.querySelector("#history-page-title").textContent'), 'Historique')
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.equal(await evaluate('document.querySelector("#history-exercise").value'), 'snatch')
     assert.equal(await evaluate('document.querySelector("#history-date").value'), '2026-11-06')
     assert.equal(await guardActive(), true)
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-c"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-c"]')
     await click('Notes', historyScope)
     assert.equal(await j10Value('.workout-history textarea'), 'Bilan temporaire TEST B')
     assert.equal(await evaluate('window.j10cNote === document.querySelector(".workout-history textarea")'), true)
@@ -3062,7 +3137,7 @@ try {
       localStorage.setItem('liftboard.workouts.v1', JSON.stringify(workouts))
     })
     const latest = await storedWorkouts()
-    await click('Consulter la séance', '[aria-labelledby="history-card-j10-b"]')
+    await click('Consulter', '[aria-labelledby="history-card-j10-b"]')
     await click('Notes', historyScope)
     assert.equal(await j10Value('.workout-history textarea'), 'Bilan plus récent ailleurs')
     assert.deepEqual(await storedWorkouts(), latest)
@@ -3090,7 +3165,7 @@ try {
       await click('Séances', '.primary-nav')
       await click('Séances', '.primary-nav')
       assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
-      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+      assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
       assert.equal(await guardActive(), true)
       await click(editing ? 'Reprendre la modification' : 'Reprendre le brouillon', j10Scope)
       assert.equal(await j10Value('#workout-title'), 'Édition à garder')
@@ -3099,7 +3174,7 @@ try {
       assert.equal(await j10Value(`${j10Scope} textarea`), 'Consigne non enregistrée')
       assert.deepEqual(await storedWorkouts(), workouts)
       await click('Annuler', j10Scope)
-      await click('Abandonner les modifications', 'dialog[open]')
+      await click('Abandonner les modifications', 'dialog[open]:not(.record-editor-dialog)')
       assert.deepEqual(await storedWorkouts(), workouts)
       assert.equal(await guardActive(), false)
     })
@@ -3115,7 +3190,7 @@ try {
     await click('Séances', '.primary-nav')
     await click('Séances', '.primary-nav')
     assert.equal(await evaluate('document.querySelector("#workout-page-title").textContent'), 'Mes séances')
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".data-backup > p.record-hint")].map(p => p.textContent)'), [
       "Télécharge une copie de tes records, séances et notes pour les retrouver si tu changes d'appareil ou de navigateur.",
       'Seules les données déjà enregistrées sont sauvegardées. Conserve ton fichier de sauvegarde en lieu sûr.',
@@ -3194,12 +3269,13 @@ try {
     await viewport(412, 'lot2-setup')
   }
 
-  await check('UX V2 lot 2 : première série éditable, 24 aperçus exacts et aucune confirmation implicite', async () => {
+  await check('UX V2 lot 2 : première série sélectionnée, 24 aperçus exacts et aucune confirmation implicite', async () => {
     await setupLot2()
-    assert.equal((await lot2State()).visibleInputs, 2)
+    assert.equal((await lot2State()).visibleInputs, 0)
+    assert.equal(await call(scope => document.querySelector(scope).classList.contains('workout-execution-set-ready'), lot2Scope()), true)
     assert.equal((await lot2State()).compact, false)
     assert.equal(await evaluate('document.querySelectorAll(".workout-execution-set-compact").length'), 24)
-    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-confirm-planned").length'), 24)
+    assert.equal(await evaluate('document.querySelectorAll(".workout-execution-confirm-planned").length'), 25)
     for (let block = 0; block < 5; block++) for (let index = 0; index < 5; index++) {
       if (block === 0 && index === 0) continue
       const state = await lot2State(block, index)
@@ -3253,11 +3329,12 @@ try {
     assert.equal((await lot2State()).status, '✓ Réalisée')
     assert.equal((await lot2State()).compact, true)
     assert.equal((await lot2State()).result, '70 kg × 2 rép.')
-    assert.equal((await lot2State(0, 1)).visibleInputs, 2)
+    assert.equal((await lot2State(0, 1)).visibleInputs, 0)
+    assert.equal(await call(scope => document.querySelector(scope).classList.contains('workout-execution-set-ready'), lot2Scope(0, 1)), true)
     assert.equal(await call(scope => document.activeElement === document.querySelector(scope).querySelector('.workout-execution-toggle'), lot2Scope()), true)
     assert.equal(await lot2At(0, 1), undefined)
     assert.equal((await storedWorkouts())[0].status, 'planned')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 série réalisée sur 25')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '1 / 25 séries réalisées')
   })
 
   await check('UX V2 lot 2 : deux saisies partielles sauvegardées restent ouvertes après sélection et actualisation', async () => {
@@ -3279,7 +3356,7 @@ try {
     assert.equal((await lot2State(0, 1)).compact, true)
     assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('reps')), '3')
     assert.equal(await call(selector => document.querySelector(selector).value, lot2Field('loadKg', 0, 2)), '77,5')
-    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 série réalisée sur 25')
+    assert.equal(await evaluate('document.querySelector(".workout-execution-progress").textContent'), '0 / 25 séries réalisées')
     await click('Série réalisée', lot2Scope())
     assert.equal((await lot2State(0, 2)).visibleInputs, 2)
     assert.equal((await lot2State(0, 1)).compact, true)
@@ -3350,7 +3427,8 @@ try {
       await click('Réessayer', lot2Scope())
       assert.deepEqual(await lot2At(), { completed: true, reps: 2, loadKg: 70 })
       assert.equal((await lot2State()).compact, true)
-      assert.equal((await lot2State(0, 1)).visibleInputs, 2)
+      assert.equal((await lot2State(0, 1)).visibleInputs, 0)
+      assert.equal(await call(scope => document.querySelector(scope).classList.contains('workout-execution-set-ready'), lot2Scope(0, 1)), true)
       assert.equal(await guardActive(), false)
     })
   }
@@ -3369,7 +3447,7 @@ try {
     assert.match(await call(scope => document.querySelector(scope).querySelector('[role="alert"]').textContent, lot2Scope()), /ont changé ailleurs/)
     assert.deepEqual(await lot2At(), { completed: false, reps: 1, loadKg: 65 })
     await click('Retour aux séances')
-    await click('Abandonner la saisie', 'dialog[open]')
+    await click('Abandonner la saisie', 'dialog[open]:not(.record-editor-dialog)')
     await click('Ouvrir', '.workout-session-list')
     await click('Reprendre le suivi')
     assert.equal((await lot2State()).visibleInputs, 2)
@@ -3388,12 +3466,12 @@ try {
     await click('← Retour au suivi')
     await click('Records', '.primary-nav')
     await click('Séances', '.primary-nav')
-    await click('Continuer ma saisie', 'dialog[open]')
+    await click('Continuer ma saisie', 'dialog[open]:not(.record-editor-dialog)')
     assert.equal(await call(selector => document.querySelector(selector) === window.lot2InvalidInput && window.lot2InvalidInput.value === '77,', lot2Field('loadKg')), true)
     await click('Fermer l’édition', lot2Scope())
     assert.equal((await lot2State()).visibleInputs, 2)
     await click('Terminer la séance')
-    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]"))'), false)
+    assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.equal(await guardActive(), true)
     assert.deepEqual(await storedWorkouts(), [lot2Source])
     await enter(lot2Field('loadKg'), '77,5')
@@ -3431,7 +3509,8 @@ try {
     assert.equal((await lot2State()).compact, true)
     await call(scope => document.querySelector(scope).querySelector('[type="submit"]').scrollIntoView({ block: 'end' }), lot2Scope(0, 4))
     await click('Série réalisée', lot2Scope(0, 4))
-    assert.equal((await lot2State(1, 0)).visibleInputs, 2)
+    assert.equal((await lot2State(1, 0)).visibleInputs, 0)
+    assert.equal(await call(scope => document.querySelector(scope).classList.contains('workout-execution-set-ready'), lot2Scope(1, 0)), true)
     assert.equal((await lot2State(0, 1)).compact, true)
     assert.equal(await lot2At(1, 0), undefined)
     assert.equal(await call(scope => document.activeElement === document.querySelector(scope).querySelector('.workout-execution-toggle'), lot2Scope(0, 4)), true)
@@ -3457,7 +3536,7 @@ try {
       const forms = [...document.querySelectorAll('.workout-execution-set')]
       return { width: innerWidth, trackingHeight: document.querySelector('.workout-execution-content').getBoundingClientRect().height,
         documentHeight: document.documentElement.scrollHeight, fullyVisibleSets: forms.filter(fullyVisible).length,
-        visiblePrescriptions: forms.filter(form => fullyVisible(form.querySelector(form.classList.contains('workout-execution-set-unstarted')
+        visiblePrescriptions: forms.filter(form => fullyVisible(form.querySelector(form.matches('.workout-execution-set-unstarted, .workout-execution-set-ready')
           ? '.workout-execution-result' : '.workout-execution-planned'))).length }
     })
     for (const width of [320, 375, 412, 768, 1440]) {
@@ -3483,12 +3562,13 @@ try {
     const conformingClicks = await evaluate('window.lot2Clicks.length')
     assert.equal(conformingClicks, 1)
     await evaluate('window.lot2Clicks = []')
+    if (!reference) await click('Ajuster', lot2Scope())
     await call(selector => { const input = document.querySelector(selector); input.focus(); input.click() }, lot2Field('loadKg'))
     await enter(lot2Field('loadKg'), '77,5')
     assert.deepEqual(await lot2At(), { completed: false, reps: null, loadKg: 77.5 })
     await click('Série réalisée', lot2Scope())
     const adjustedActiveClicks = await evaluate('window.lot2Clicks.length')
-    assert.equal(adjustedActiveClicks, 2)
+    assert.equal(adjustedActiveClicks, reference ? 2 : 3)
     return { label, sizes, conformingClicks, adjustedActiveClicks }
   }
 

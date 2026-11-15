@@ -12,6 +12,7 @@ import { loadWorkouts, workoutsStorageKey, type WorkoutsResult } from './data/wo
 import { findTrackedWorkout, loadNavigation, saveNavigation, type SectionId } from './lib/navigation'
 import { historyFiltersForWorkout, type HistoryFilters } from './lib/workoutHistory'
 import './App.css'
+import './styles/forge.css'
 
 const sections = [
   { id: 'sessions', label: 'Séances', title: 'Mes séances' },
@@ -167,6 +168,10 @@ function App() {
             ))}
           </ul>
         </nav>
+        <div className="navigation-signature" aria-hidden="true">
+          <p>La force se construit.</p>
+          <span>Un mouvement à la fois.</span>
+        </div>
       </div>
 
       <main
@@ -181,7 +186,8 @@ function App() {
           </button>
         )}
         {activeSection !== 'sessions' && activeSection !== 'history' && (
-          <div className={`page-heading${activeSection === 'records' ? ' page-heading-records' : ''}`}>
+          <div className={`page-heading forge-heading${activeSection === 'records' ? ' page-heading-records' : ''}`}>
+            <p className="forge-kicker">{activeSection === 'records' ? 'Vos performances' : 'Outil / Intensité'}</p>
             <h1 id="page-title" aria-live="polite" aria-atomic="true">
               {currentSection.title}
             </h1>
@@ -208,6 +214,7 @@ function App() {
         <section hidden={activeSection !== 'records'} aria-label="Records personnels">
           <PersonalRecords
             key={dataRevision}
+            isActive={activeSection === 'records'}
             storedRecords={storedRecords}
             onPersist={persistRecords}
             onReload={() => setStoredRecords(loadPersonalRecords())}

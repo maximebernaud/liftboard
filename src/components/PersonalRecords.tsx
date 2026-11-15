@@ -8,15 +8,17 @@ import {
 import ExerciseCard from './ExerciseCard'
 import WorkoutConfirmation from './WorkoutConfirmation'
 import { recordDiscardMessage, type RecordEditDraft } from '../lib/recordDiscard'
+import './PersonalRecords.css'
 
 type PersonalRecordsProps = {
+  isActive: boolean
   storedRecords: RecordsLoadResult
   onPersist: (mutation: RecordMutation) => string | null
   onReload: () => void
   onPendingChange: (pending: boolean) => void
 }
 
-function PersonalRecords({ storedRecords, onPersist, onReload, onPendingChange }: PersonalRecordsProps) {
+function PersonalRecords({ isActive, storedRecords, onPersist, onReload, onPendingChange }: PersonalRecordsProps) {
   const [editingExerciseId, setEditingExerciseId] = useState<Exercise['id'] | null>(null)
   const [unsavedDraft, setUnsavedDraft] = useState<RecordEditDraft | null>(null)
   const hasUnsavedChanges = unsavedDraft !== null
@@ -52,28 +54,39 @@ function PersonalRecords({ storedRecords, onPersist, onReload, onPendingChange }
           </button>
         </div>
       )}
-      <p className="records-storage-note">
+      {(records !== null || editingExerciseId !== null) && (
+        <div className="records-catalog">
+          {[...new Set(exercises.map((exercise) => exercise.category))].map((category, index) => (
+            <section className="records-group" key={category} aria-labelledby={`records-category-${index}`}>
+              <div className="records-group-heading">
+                <h2 id={`records-category-${index}`}>{category}</h2>
+                <span aria-hidden="true">Record 1RM</span>
+              </div>
+              <ul className="exercise-grid">
+                {exercises.filter((exercise) => exercise.category === category).map((exercise) => (
+                  <li key={exercise.id} id={`record-${exercise.id}-row`}>
+                    <ExerciseCard
+                      exercise={exercise}
+                      record={records?.find((record) => record.exerciseId === exercise.id)}
+                      storageUnavailable={records === null}
+                      isEditing={editingExerciseId === exercise.id}
+                      isActive={isActive}
+                      onStartEditing={() => changeEditor(exercise.id)}
+                      onStopEditing={() => { setEditingExerciseId(null); setUnsavedDraft(null) }}
+                      onDirtyChange={setUnsavedDraft}
+                      onSave={(oneRepMaxKg, original) => onPersist({ exerciseId: exercise.id, original, oneRepMaxKg })}
+                      onDelete={(original) => onPersist({ exerciseId: exercise.id, original, oneRepMaxKg: null })}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+      <p className="records-storage-note records-footer">
         Vos records sont enregistrés uniquement dans ce navigateur, sur cet appareil.
       </p>
-      {(records !== null || editingExerciseId !== null) && (
-        <ul className="exercise-grid">
-          {exercises.map((exercise) => (
-            <li key={exercise.id}>
-              <ExerciseCard
-                exercise={exercise}
-                record={records?.find((record) => record.exerciseId === exercise.id)}
-                storageUnavailable={records === null}
-                isEditing={editingExerciseId === exercise.id}
-                onStartEditing={() => changeEditor(exercise.id)}
-                onStopEditing={() => { setEditingExerciseId(null); setUnsavedDraft(null) }}
-                onDirtyChange={setUnsavedDraft}
-                onSave={(oneRepMaxKg, original) => onPersist({ exerciseId: exercise.id, original, oneRepMaxKg })}
-                onDelete={(original) => onPersist({ exerciseId: exercise.id, original, oneRepMaxKg: null })}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
       {pendingExerciseId && discardMessage && (
         <WorkoutConfirmation title="Modifications non enregistrées" cancelLabel="Continuer à modifier" confirmLabel="Abandonner les modifications"
           onCancel={() => setPendingExerciseId(null)}

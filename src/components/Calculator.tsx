@@ -35,123 +35,139 @@ function Calculator({ storedRecords, onOpenRecords }: CalculatorProps) {
 
   return (
     <div className="calculator">
-      <div className="calculator-field">
-        <label htmlFor="calculator-exercise">Exercice</label>
-        <select
-          id="calculator-exercise"
-          value={exerciseId}
-          onChange={(event) => {
-            const selected = exercises.find((item) => item.id === event.target.value)
-            if (selected) setExerciseId(selected.id)
-          }}
-        >
-          {exercises.map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-        </select>
+      <div className="calculator-section-heading">
+        <p>Votre charge d’entraînement</p>
+        <span>Calcul automatique</span>
       </div>
-
-      {storedRecords.records === null ? (
-        <div className="calculator-missing-record">
-          <p className="record-error" role="alert">{storedRecords.error}</p>
-          <p>Le calcul est indisponible tant que vos records ne peuvent pas être chargés.</p>
-          <button className="record-button" type="button" onClick={onOpenRecords}>
-            Ouvrir les Records
-          </button>
-        </div>
-      ) : record ? (
-        <>
-          <div className="calculator-record">
-            <p className="calculator-label">Record personnel (1RM)</p>
-            <p className="calculator-record-value">
-              {formatNumber(record.oneRepMaxKg)} <span>kg</span>
-            </p>
+      <div className="calculator-layout">
+        <div className="calculator-parameters">
+          <div className="calculator-field">
+            <label htmlFor="calculator-exercise">Exercice</label>
+            <select
+              id="calculator-exercise"
+              value={exerciseId}
+              onChange={(event) => {
+                const selected = exercises.find((item) => item.id === event.target.value)
+                if (selected) setExerciseId(selected.id)
+              }}
+            >
+              {exercises.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
           </div>
 
-          <div className="calculator-fields">
-            <div className="calculator-field">
-              <label htmlFor="calculator-intensity">Intensité (%)</label>
-              <input
-                id="calculator-intensity"
-                name="intensityPct"
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                spellCheck={false}
-                value={intensityInput}
-                onChange={(event) => setIntensityInput(event.target.value)}
-                onKeyDown={(event) => handleNumericArrow(event.nativeEvent, event.currentTarget.value, 'intensity', setIntensityInput)}
-                aria-invalid={intensityError !== null}
-                aria-describedby={`calculator-intensity-hint${intensityError ? ' calculator-intensity-error' : ''}`}
-              />
-              <p id="calculator-intensity-hint" className="record-hint">
-                De 1 à 100 %. Par exemple : 72,5 ou 72.5.
+          {storedRecords.records === null ? (
+            <div className="calculator-missing-record">
+              <p className="record-error" role="alert">{storedRecords.error}</p>
+              <p>Le calcul est indisponible tant que vos records ne peuvent pas être chargés.</p>
+              <button className="record-button" type="button" onClick={onOpenRecords}>
+                Ouvrir les Records
+              </button>
+            </div>
+          ) : record ? (
+            <>
+              <div className="calculator-record">
+                <p className="calculator-label">Record personnel (1RM)</p>
+                <p className="calculator-record-value">
+                  {formatNumber(record.oneRepMaxKg)} <span>kg</span>
+                </p>
+              </div>
+
+              <div className="calculator-fields">
+                <div className="calculator-field">
+                  <label htmlFor="calculator-intensity">Intensité (%)</label>
+                  <input
+                    id="calculator-intensity"
+                    name="intensityPct"
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={intensityInput}
+                    onChange={(event) => setIntensityInput(event.target.value)}
+                    onKeyDown={(event) => handleNumericArrow(event.nativeEvent, event.currentTarget.value, 'intensity', setIntensityInput)}
+                    aria-invalid={intensityError !== null}
+                    aria-describedby={`calculator-intensity-hint${intensityError ? ' calculator-intensity-error' : ''}`}
+                  />
+                  <p id="calculator-intensity-hint" className="record-hint">
+                    De 1 à 100 %. Par exemple : 72,5 ou 72.5.
+                  </p>
+                  {intensityError && (
+                    <p id="calculator-intensity-error" className="record-error" role="alert">
+                      {intensityError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="calculator-field">
+                  <label htmlFor="calculator-rounding">Arrondi de la charge</label>
+                  <select
+                    id="calculator-rounding"
+                    value={roundingIncrement ?? 'none'}
+                    onChange={(event) => {
+                      const selected = roundingOptions.find(
+                        (item) => String(item.value ?? 'none') === event.target.value,
+                      )
+                      if (selected) setRoundingIncrement(selected.value)
+                    }}
+                    aria-describedby={roundingIncrement !== null ? 'calculator-rounding-hint' : undefined}
+                  >
+                    {roundingOptions.map((option) => (
+                      <option key={option.value ?? 'none'} value={option.value ?? 'none'}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {roundingIncrement !== null && (
+                    <p id="calculator-rounding-hint" className="record-hint">
+                      Multiple le plus proche ; à mi-chemin, le multiple supérieur est retenu.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+            </>
+          ) : (
+            <div className="calculator-missing-record">
+              <h2>Aucun record pour {exercise.name}</h2>
+              <p>Renseignez votre 1RM dans l’onglet Records pour calculer une charge.</p>
+              <button className="record-button" type="button" onClick={onOpenRecords}>
+                Renseigner mon record
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="calculator-result" role="status" aria-live="polite" aria-atomic="true">
+          <h2>{roundingIncrement === null ? 'Charge calculée' : 'Charge arrondie'}</h2>
+          {record && result && intensity !== null ? (
+            <>
+              <p className="calculator-result-value">
+                {formatNumber(result.roundedKg)} <span>kg</span>
               </p>
-              {intensityError && (
-                <p id="calculator-intensity-error" className="record-error" role="alert">
-                  {intensityError}
-                </p>
-              )}
-            </div>
-
-            <div className="calculator-field">
-              <label htmlFor="calculator-rounding">Arrondi de la charge</label>
-              <select
-                id="calculator-rounding"
-                value={roundingIncrement ?? 'none'}
-                onChange={(event) => {
-                  const selected = roundingOptions.find(
-                    (item) => String(item.value ?? 'none') === event.target.value,
-                  )
-                  if (selected) setRoundingIncrement(selected.value)
-                }}
-                aria-describedby={roundingIncrement !== null ? 'calculator-rounding-hint' : undefined}
-              >
-                {roundingOptions.map((option) => (
-                  <option key={option.value ?? 'none'} value={option.value ?? 'none'}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              <p className="calculator-formula">
+                {exercise.name} · {formatNumber(record.oneRepMaxKg)} kg × {formatNumber(intensity)} %
+              </p>
               {roundingIncrement !== null && (
-                <p id="calculator-rounding-hint" className="record-hint">
-                  Multiple le plus proche ; à mi-chemin, le multiple supérieur est retenu.
-                </p>
+                <div className="calculator-exact">
+                  <p>Charge exacte : <strong>{formatNumber(result.exactKg)} kg</strong></p>
+                  <p>Arrondi au multiple de {formatNumber(roundingIncrement)} kg le plus proche.</p>
+                </div>
               )}
-            </div>
-          </div>
-
-          <div className="calculator-result" role="status" aria-live="polite" aria-atomic="true">
-            {result && intensity !== null ? (
-              <>
-                <h2>{roundingIncrement === null ? 'Charge calculée' : 'Charge arrondie'}</h2>
-                <p className="calculator-result-value">
-                  {formatNumber(result.roundedKg)} <span>kg</span>
-                </p>
-                <p className="calculator-formula">
-                  {exercise.name} : {formatNumber(record.oneRepMaxKg)} kg × {formatNumber(intensity)} %
-                </p>
-                {roundingIncrement !== null && (
-                  <div className="calculator-exact">
-                    <p>Charge exacte : <strong>{formatNumber(result.exactKg)} kg</strong></p>
-                    <p>Arrondi au multiple de {formatNumber(roundingIncrement)} kg le plus proche.</p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <p>Saisissez une intensité valide pour calculer la charge.</p>
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="calculator-missing-record">
-          <h2>Aucun record pour {exercise.name}</h2>
-          <p>Renseignez votre 1RM dans l’onglet Records pour calculer une charge.</p>
-          <button className="record-button" type="button" onClick={onOpenRecords}>
-            Renseigner mon record
-          </button>
+              <p className="calculator-result-note">Résultat indicatif issu du 1RM enregistré sur cet appareil.</p>
+            </>
+          ) : (
+            <p className="calculator-result-placeholder">
+              {storedRecords.records === null
+                ? 'Le résultat sera disponible lorsque vos records pourront être chargés.'
+                : !record
+                  ? 'Renseignez votre record pour calculer une charge.'
+                  : 'Saisissez une intensité valide pour calculer la charge.'}
+            </p>
+          )}
         </div>
-      )}
+      </div>
+      <p className="calculator-footnote">Le record est consulté depuis la rubrique Records. Les calculs ne modifient aucune charge enregistrée.</p>
     </div>
   )
 }

@@ -2515,9 +2515,14 @@ try {
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Ajustement de la charge").length'), 5)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set .workout-load")].every(load => /Charge prévue.*82,5 kg.*Charge exacte calculée : 83,3 kg/.test(load.textContent))'), true)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-editor > .record-hint")].filter(p => p.textContent === "La charge est calculée automatiquement à partir du 1RM et de l’intensité choisie.").length'), 1)
-    assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select").options].map(option => option.textContent)'), [
-      'Sans arrondi', 'Arrondi supérieur · 1 kg', 'Arrondi supérieur · 2,5 kg',
-      'Arrondi supérieur · 5 kg', 'Arrondi inférieur · 1 kg', 'Arrondi inférieur · 2,5 kg', 'Arrondi inférieur · 5 kg',
+    assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select").options].map(option => [option.value, option.textContent])'), [
+      ['exact', 'Sans arrondi'],
+      ['up-1', 'Vers le haut · 1 kg'],
+      ['up-2.5', 'Vers le haut · 2,5 kg'],
+      ['up-5', 'Vers le haut · 5 kg'],
+      ['down-1', 'Vers le bas · 1 kg'],
+      ['down-2.5', 'Vers le bas · 2,5 kg'],
+      ['down-5', 'Vers le bas · 5 kg'],
     ])
     await select('.workout-field > select:not([id$="-rounding"])', 'front-squat')
     assert.match(await evaluate('document.querySelector(".workout-record-context").textContent'), /Record à renseigner/)

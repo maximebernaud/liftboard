@@ -224,6 +224,7 @@ function App() {
 
         <section hidden={activeSection !== 'calculator'} aria-label="Calculateur de charge">
           <Calculator
+            isActive={activeSection === 'calculator'}
             storedRecords={storedRecords}
             onOpenRecords={openRecords}
           />

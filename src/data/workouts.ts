@@ -1,4 +1,4 @@
-import { exercises } from './personalRecords.ts'
+import { exercises } from './exercises.ts'
 import { isValidWorkoutDate, isWorkoutSetRounding } from '../lib/workoutDraft.ts'
 import { roundLoadDirected } from '../lib/loadCalculator.ts'
 import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution, workoutProgramSignature } from '../lib/workoutExecution.ts'

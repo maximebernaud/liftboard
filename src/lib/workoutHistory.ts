@@ -1,8 +1,15 @@
-import { exercises, type Exercise } from '../data/personalRecords.ts'
+import { exercises, type Exercise } from '../data/exercises.ts'
 import { getWorkoutProgress, requiresExecutionCorrection } from './workoutExecution.ts'
 import type { Workout } from '../types/workout.ts'
 
 export type HistoryFilters = { exerciseId: Exercise['id'] | ''; date: string }
+
+/** Les choix dépendent des séances terminées, indépendamment des filtres actifs. */
+export function historyExercises(workouts: readonly Workout[]): Exercise[] {
+  const ids = new Set(workouts.filter((workout) => workout.status === 'completed')
+    .flatMap((workout) => workout.exercises.map((block) => block.exerciseId)))
+  return exercises.filter((exercise) => ids.has(exercise.id))
+}
 
 // Ajustement uniquement après une clôture réussie ; les critères compatibles restent actifs.
 export function historyFiltersForWorkout(filters: HistoryFilters, workout: Workout): HistoryFilters {

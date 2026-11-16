@@ -1,3 +1,4 @@
+import { exercisePickerActions } from './helpers/exercisePicker.mjs'
 // Test réel de React sans dépendance : Chrome headless + protocole DevTools.
 // Le profil est créé dans un dossier temporaire distinct du navigateur habituel.
 // Démarrer Vite, puis : node tests/workouts.browser.mjs http://127.0.0.1:5173
@@ -49,6 +50,7 @@ async function evaluate(expression) {
 
 const call = (fn, ...args) => evaluate(`(${fn.toString()})(${args.map((value) => JSON.stringify(value)).join(',')})`)
 const settle = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+const { addExercise, changeExercise } = exercisePickerActions({ call, click, settle })
 
 async function click(text, scope = 'body') {
   // Conserver les parcours de confirmation manuelle lorsque leur série est repliée.
@@ -844,7 +846,7 @@ try {
     await click('Ouvrir', '.workout-session-list')
     await click('Modifier')
     removalDraft = await draftBlocks()
-    await click('+ Ajouter un exercice')
+    await addExercise('snatch')
     await click('Retirer l’exercice', '.workout-exercise:nth-child(3)')
     assert.equal(await evaluate('Boolean(document.querySelector("dialog[open]:not(.record-editor-dialog)"))'), false)
     assert.deepEqual(await draftBlocks(), removalDraft)
@@ -909,7 +911,7 @@ try {
     assert.deepEqual(await storedWorkouts(), [])
     await enter('#workout-title', 'Technique A')
     await enter('#workout-date', '2026-11-02')
-    await click('+ Ajouter un exercice')
+    await addExercise('snatch')
     await enter('.workout-exercise input', '3')
     await enter('.workout-exercise input[id$="-intensity"]', '75,')
     await click('Enregistrer la séance')
@@ -1071,8 +1073,8 @@ try {
     await click('+ Nouvelle séance')
     await enter('#workout-title', 'Séance B sans record')
     await enter('#workout-date', '2026-11-02')
-    await click('+ Ajouter un exercice')
-    await select('.workout-exercise select', 'front-squat')
+    await addExercise('snatch')
+    await changeExercise('front-squat', '.workout-exercise')
     await enter('.workout-exercise input', '3')
     await enter('.workout-exercise input[id$="-intensity"]', '70')
     await click('+ Ajouter une série')
@@ -1196,8 +1198,8 @@ try {
     await click('Séances', '.primary-nav')
     await click('+ Nouvelle séance')
     await enter('#workout-title', 'Séries identiques')
-    await click('+ Ajouter un exercice')
-    await select('.workout-exercise select', 'clean-and-jerk')
+    await addExercise('snatch')
+    await changeExercise('clean-and-jerk', '.workout-exercise')
     const reps = '.workout-set:first-child input[id$="-reps"]'
     const intensity = '.workout-set:first-child input[id$="-intensity"]'
     await enter(reps, '3')
@@ -2457,7 +2459,8 @@ try {
     await click('Réinitialiser les filtres', historyScope)
     await enter('#history-date', '2026-10-25')
     assert.deepEqual(await historyCards(), [b.title, c.title])
-    await select('#history-exercise', 'back-squat')
+    await enter('#history-date', a.date)
+    await select('#history-exercise', 'front-squat')
     assert.match(await evaluate('document.querySelector(".workout-history .empty-state").textContent'), /Aucune séance ne correspond à ces filtres/)
     await click('Effacer les filtres', historyScope)
     assert.deepEqual(await historyCards(), [a.title, b.title, c.title])
@@ -2504,7 +2507,7 @@ try {
     await reload()
     await click('+ Nouvelle séance')
     await enter('#workout-title', 'UX création')
-    await click('+ Ajouter un exercice')
+    await addExercise('snatch')
     await enter('.workout-exercise input[id$="-reps"]', '2')
     await enter('.workout-exercise input[id$="-intensity"]', '83,3')
     await select('.workout-exercise select[id$="-rounding"]', 'down-2.5')
@@ -2514,7 +2517,7 @@ try {
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Intensité (% du 1RM)").length'), 5)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Ajustement de la charge").length'), 5)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set .workout-load")].every(load => /Charge prévue.*82,5 kg.*Charge exacte calculée : 83,3 kg/.test(load.textContent))'), true)
-    assert.equal(await evaluate('[...document.querySelectorAll(".workout-editor > .record-hint")].filter(p => p.textContent === "La charge est calculée automatiquement à partir du 1RM et de l’intensité choisie.").length'), 1)
+    assert.equal(await evaluate('[...document.querySelectorAll(".workout-editor > .record-hint")].filter(p => p.textContent === "Lorsqu’un Record est disponible, la charge est calculée à partir du 1RM et de l’intensité choisie.").length'), 1)
     assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select").options].map(option => [option.value, option.textContent])'), [
       ['exact', 'Sans arrondi'],
       ['up-1', 'Vers le haut · 1 kg'],
@@ -2524,10 +2527,10 @@ try {
       ['down-2.5', 'Vers le bas · 2,5 kg'],
       ['down-5', 'Vers le bas · 5 kg'],
     ])
-    await select('.workout-field > select:not([id$="-rounding"])', 'front-squat')
+    await changeExercise('front-squat', '.workout-exercise')
     assert.match(await evaluate('document.querySelector(".workout-record-context").textContent'), /Record à renseigner/)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-load > strong")].every(load => load.textContent === "—")'), true)
-    await select('.workout-field > select:not([id$="-rounding"])', 'snatch')
+    await changeExercise('snatch', '.workout-exercise')
     await viewport(320, 'ux-editor', true)
     await click('Enregistrer la séance')
     assert.equal((await storedWorkouts())[0].exercises[0].sets.length, 5)
@@ -3167,7 +3170,7 @@ try {
         await click('Modifier', j10Scope)
       } else {
         await click('+ Nouvelle séance', j10Scope)
-        await click('+ Ajouter un exercice', j10Scope)
+        await addExercise('snatch', j10Scope)
       }
       await enter('#workout-title', 'Édition à garder')
       await enter(`${j10Scope} input[id$="-intensity"]`, '75,')
@@ -3234,7 +3237,7 @@ try {
     assert.match(await evaluate('document.querySelector(".records-storage-error").textContent'), /illisibles/)
     await click('+ Nouvelle séance')
     await enter('#workout-title', 'Ne pas perdre')
-    await click('+ Ajouter un exercice')
+    await addExercise('snatch')
     await enter('.workout-exercise input', '1')
     await enter('.workout-exercise input[id$="-intensity"]', '75')
     await click('Enregistrer la séance')

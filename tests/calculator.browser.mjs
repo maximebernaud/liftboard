@@ -1,3 +1,4 @@
+import { exercisePickerActions } from './helpers/exercisePicker.mjs'
 // Lot D : interactions, stockage surveillé et captures dans un profil Chrome isolé.
 // node tests/calculator.browser.mjs http://127.0.0.1:5177 [--baseline]
 import assert from 'node:assert/strict'
@@ -36,6 +37,7 @@ async function evaluate(expression) {
 }
 const call = (fn, ...args) => evaluate(`(${fn.toString()})(${args.map(value => JSON.stringify(value)).join(',')})`)
 const settle = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+const { addExercise } = exercisePickerActions({ call, click, settle })
 async function waitForApp() {
   for (let attempt = 0; attempt < 80; attempt++) {
     if (await evaluate('Boolean(document.querySelector("#workout-page-title"))')) { await settle(); return }
@@ -431,7 +433,7 @@ try {
       await watchStorage()
       await click('Séances', '.primary-nav')
       await click('+ Nouvelle séance', '.workout-sessions')
-      await click('+ Ajouter un exercice', '.workout-editor')
+      await addExercise('snatch', '.workout-editor')
       await enter('.workout-exercise input[id$="-reps"]', '3')
       await enter('.workout-exercise input[id$="-intensity"]', '75')
       assert.match(await text('.workout-load'), /75 kg/)

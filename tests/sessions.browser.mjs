@@ -1,3 +1,4 @@
+import { exercisePickerActions } from './helpers/exercisePicker.mjs'
 // Lots B et C : interactions de présentation, audit responsive et captures réelles.
 // node tests/sessions.browser.mjs http://127.0.0.1:5176
 import assert from 'node:assert/strict'
@@ -37,6 +38,7 @@ async function evaluate(expression) {
 }
 const call = (fn, ...args) => evaluate(`(${fn.toString()})(${args.map(value => JSON.stringify(value)).join(',')})`)
 const settle = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+const { addExercise, changeExercise } = exercisePickerActions({ call, click, settle })
 async function check(label, action) {
   try { await action() } catch (error) {
     console.error(`${passed} contrôles réussis ; échec : ${label}`)
@@ -243,7 +245,7 @@ try {
   await check('Éditeur : champs et calculs issus des Records', async () => {
     await click('Reprendre le brouillon')
     await enter('#workout-date', '2026-11-18')
-    await click('+ Ajouter un exercice')
+    await addExercise('snatch')
     firstSetId = await evaluate('document.querySelector(".workout-set input").id.replace(/-reps$/, "")')
     await enter(`#${firstSetId}-reps`, '2')
     await enter(`#${firstSetId}-intensity`, '75')
@@ -257,8 +259,8 @@ try {
     await enter('.workout-set:nth-child(2) input[id$=reps]', '2')
     const secondSetId = await evaluate('document.querySelectorAll(".workout-set input[id$=intensity]")[1].id')
     await enter(`#${secondSetId}`, '80')
-    await click('+ Ajouter un exercice')
-    await select('.workout-exercise:last-child select', 'clean-and-jerk')
+    await addExercise('snatch')
+    await changeExercise('clean-and-jerk', '.workout-exercise:last-child')
     await enter('.workout-exercise:last-child input[id$=reps]', '2')
     await enter('.workout-exercise:last-child input[id$=intensity]', '75')
     assert.equal(await evaluate('document.querySelectorAll(".workout-record-context input").length'), 0)

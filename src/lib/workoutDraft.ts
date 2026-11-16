@@ -1,4 +1,5 @@
-import { exercises, type Exercise, type PersonalRecord } from '../data/personalRecords.ts'
+import { exercises, type Exercise } from '../data/exercises.ts'
+import type { PersonalRecord } from '../data/personalRecords.ts'
 import { calculateLoad, parseIntensity, roundingIncrements, roundLoadDirected } from './loadCalculator.ts'
 import type {
   WorkoutDraft,

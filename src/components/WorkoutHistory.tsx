@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { exercises } from '../data/personalRecords'
 import { loadWorkouts, reopenWorkout, sortWorkouts, type WorkoutsResult } from '../data/workouts'
 import { getWorkoutProgress } from '../lib/workoutExecution'
-import { filterWorkoutHistory, formatWorkoutDate, type HistoryFilters } from '../lib/workoutHistory'
+import { filterWorkoutHistory, formatWorkoutDate, historyExercises, type HistoryFilters } from '../lib/workoutHistory'
 import type { Workout } from '../types/workout'
 import SectionIcon from './SectionIcon'
 import WorkoutConfirmation from './WorkoutConfirmation'
@@ -37,6 +36,9 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
   const completed = stored.ok ? stored.workouts.filter((item) => item.status === 'completed') : []
   const filtered = sortWorkouts(filterWorkoutHistory(completed, filters))
   const hasFilters = Boolean(filters.exerciseId || filters.date)
+  const exerciseOptions = historyExercises(completed)
+  // Conserver un filtre actif si sa dernière séance disparaît ailleurs, sans le réinitialiser.
+  const absentExerciseFilter = filters.exerciseId && !exerciseOptions.some((exercise) => exercise.id === filters.exerciseId)
   useEffect(() => { onPendingChange(pendingNotes) }, [pendingNotes, onPendingChange])
 
   useEffect(() => {
@@ -142,7 +144,8 @@ export default function WorkoutHistory({ stored, onStoredChange, onSessions, onR
                         <select id="history-exercise" value={filters.exerciseId} onChange={(event) =>
                           onFiltersChange({ ...filters, exerciseId: event.target.value as HistoryFilters['exerciseId'] })}>
                           <option value="">Tous les exercices</option>
-                          {exercises.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}
+                          {absentExerciseFilter && <option value={filters.exerciseId}>Exercice filtré (aucune séance disponible)</option>}
+                          {exerciseOptions.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}
                         </select>
                       </div>
                       <div className="workout-field">

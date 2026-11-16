@@ -1,6 +1,7 @@
-import { exercises, type Exercise } from './exercises.ts'
+import { recordExercises as exercises, type RecordExercise as Exercise } from './exercises.ts'
 
-export { exercises, type Exercise } from './exercises.ts'
+// Vue volontairement restreinte pour conserver les contrats Records / Calculer.
+export { recordExercises as exercises, type RecordExercise as Exercise } from './exercises.ts'
 
 export type PersonalRecord = {
   exerciseId: string

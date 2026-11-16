@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { exercises } from '../data/personalRecords'
+import { exercises } from '../data/exercises'
 import { completeWorkout, updateWorkoutSetExecution, type WorkoutsResult } from '../data/workouts'
 import { workoutCompletionError, workoutCompletionMessage } from '../lib/workoutHistory'
 import {

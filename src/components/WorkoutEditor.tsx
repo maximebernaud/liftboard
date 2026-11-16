@@ -1,5 +1,6 @@
 import { useEffect,useRef,useState } from 'react'
-import { exercises,type RecordsLoadResult } from '../data/personalRecords'
+import { exercises,isRecordExerciseId,type ExerciseId } from '../data/exercises'
+import type { RecordsLoadResult } from '../data/personalRecords'
 import {
   createWorkoutExerciseDraft,
   createWorkoutSetDraft,
@@ -16,6 +17,7 @@ import { handleNumericArrow } from '../lib/numericInput'
 import type { WorkoutDraft,WorkoutDraftErrors,WorkoutExerciseDraft,WorkoutSetRounding } from '../types/workout'
 import WorkoutNotesFields from './WorkoutNotesFields'
 import WorkoutConfirmation from './WorkoutConfirmation'
+import ExercisePicker from './ExercisePicker'
 
 // Un seul contrôle combine le pas et la direction pour rester compact sur mobile.
 const roundingOptions: { value: string; label: string; rounding: WorkoutSetRounding }[]=[
@@ -76,17 +78,20 @@ type ExerciseBlockProps={
   onChange: (update: (draft: WorkoutDraft) => WorkoutDraft) => void
   onRemove: () => void
   onOpenRecords: () => void
+  onChooseMovement: () => void
+  initiallyExpanded: boolean
   showErrors: boolean
 }
 
-function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onOpenRecords,showErrors }: ExerciseBlockProps) {
+function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onOpenRecords,onChooseMovement,initiallyExpanded,showErrors }: ExerciseBlockProps) {
   const addSetButton=useRef<HTMLButtonElement>(null)
   const revealAddedSet=useRef<string|null>(null)
   const [expandedSetId,setExpandedSetId]=useState<string|null>(() =>
-    number===1||block.sets.some((set) => errors.fields[set.id])? block.sets[0]?.id??null:null,
+    initiallyExpanded||number===1||block.sets.some((set) => errors.fields[set.id])? block.sets[0]?.id??null:null,
   )
   const record=storedRecords.records?.find((item) => item.exerciseId===block.exerciseId)
   const exerciseName=exercises.find((item) => item.id===block.exerciseId)?.name
+  const recordSupported=isRecordExerciseId(block.exerciseId)
   const blockId=`workout-block-${block.id}`
 
   useEffect(() => {
@@ -116,34 +121,32 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
 
       <div className="workout-movement-context">
         <div className="workout-field">
-          <label htmlFor={blockId}>Mouvement</label>
-          <select
+          <span id={`${blockId}-label`} className="workout-label">Mouvement</span>
+          <button
             id={blockId}
-            value={block.exerciseId}
-            onChange={(event) => {
-              const selected=exercises.find((item) => item.id===event.target.value)
-              if(selected) {
-                onChange((draft) => changeDraftMovement(draft,block.id,selected.id))
-              }
-            }}
+            type="button"
+            className="record-button workout-movement-button"
+            aria-label={`Changer le mouvement de l’exercice ${number} : ${exerciseName}`}
+            aria-haspopup="dialog"
+            onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); onChooseMovement() }}
           >
-            {exercises.map((exercise) => (
-              <option key={exercise.id} value={exercise.id}>{exercise.name}</option>
-            ))}
-          </select>
+            <span>{exerciseName}</span><span aria-hidden="true">Changer ↗</span>
+          </button>
           {errors.exercise&&<p className="record-error" role="alert">{errors.exercise}</p>}
         </div>
 
         <div className="workout-record-context">
-          {storedRecords.records===null? (
+          {!recordSupported? (
+            <p>Aucun Record disponible pour ce mouvement. La charge prévue reste non calculée ; la séance peut être enregistrée.</p>
+          ):storedRecords.records===null? (
             <p className="record-error">Records indisponibles. Le calcul est en attente.</p>
           ):record? (
             <p>Record actuel (1RM) : <strong>{record.oneRepMaxKg.toString().replace('.',',')} kg</strong></p>
           ):(
             <p>Record à renseigner</p>
           )}
-          {block.sets.some((set) => set.savedLoad!==undefined)&&<p>Les charges déjà enregistrées restent figées. Le record actuel s’applique aux nouveaux calculs.</p>}
-          {(!record||storedRecords.records===null)&&(
+          {block.sets.some((set) => set.savedLoad!==undefined)&&<p>Les charges déjà enregistrées restent figées.{recordSupported&&' Le record actuel s’applique aux nouveaux calculs.'}</p>}
+          {recordSupported&&(!record||storedRecords.records===null)&&(
             <button className="record-button" type="button" onClick={onOpenRecords}>
               Ouvrir les Records
             </button>
@@ -161,6 +164,8 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
           const expanded=expandedSetId===set.id||needsCorrection
           const loadMessage=set.savedLoad===null
             ? 'Charge non enregistrée'
+            :!recordSupported
+              ? 'Aucun Record disponible pour ce mouvement'
             :storedRecords.records===null
               ? 'Records indisponibles'
               :load.status==='missing-record'
@@ -318,7 +323,28 @@ type WorkoutEditorProps={
 function WorkoutEditor({ draft,storedRecords,onChange,onOpenRecords,showErrors=false }: WorkoutEditorProps) {
   const addExerciseButton=useRef<HTMLButtonElement>(null)
   const [pendingRemoval,setPendingRemoval]=useState<WorkoutExerciseDraft|null>(null)
+  const [picker,setPicker]=useState<{ blockId?: string }|null>(null)
+  const [addedBlockId,setAddedBlockId]=useState<string|null>(null)
   const { errors }=validateWorkoutDraft(draft)
+
+  function chooseExercise(exerciseId: ExerciseId) {
+    const blockId=picker?.blockId
+    if(blockId) {
+      if(draft.exercises.some((block) => block.id===blockId&&block.exerciseId!==exerciseId)) {
+        onChange((current) => changeDraftMovement(current,blockId,exerciseId))
+      }
+    } else {
+      const block=createWorkoutExerciseDraft(exerciseId)
+      setAddedBlockId(block.id)
+      onChange((current) => ({ ...current,exercises: [...current.exercises,block] }))
+      requestAnimationFrame(() => {
+        const input=document.getElementById(`workout-set-${block.sets[0].id}-reps`)
+        input?.focus({ preventScroll: true })
+        input?.scrollIntoView({ block: 'center',behavior: 'instant' })
+      })
+    }
+    setPicker(null)
+  }
 
   function removeExercise(blockId: string) {
     onChange((current) => ({
@@ -354,7 +380,7 @@ function WorkoutEditor({ draft,storedRecords,onChange,onOpenRecords,showErrors=f
         </div>
       </section>
 
-      <p className="record-hint">La charge est calculée automatiquement à partir du 1RM et de l’intensité choisie.</p>
+      <p className="record-hint">Lorsqu’un Record est disponible, la charge est calculée à partir du 1RM et de l’intensité choisie.</p>
       <section className="workout-exercises-section" aria-labelledby="workout-exercises-title">
         <h2 id="workout-exercises-title" className="sessions-section-title">Exercices et séries</h2>
         <div className="workout-exercise-list">
@@ -367,6 +393,8 @@ function WorkoutEditor({ draft,storedRecords,onChange,onOpenRecords,showErrors=f
               storedRecords={storedRecords}
               onChange={onChange}
               onOpenRecords={onOpenRecords}
+              onChooseMovement={() => setPicker({ blockId: block.id })}
+              initiallyExpanded={block.id===addedBlockId}
               showErrors={showErrors}
               onRemove={() => {
                 if(hasWorkoutExerciseData(block)) setPendingRemoval(block)
@@ -380,10 +408,8 @@ function WorkoutEditor({ draft,storedRecords,onChange,onOpenRecords,showErrors=f
           ref={addExerciseButton}
           className="record-button workout-add-exercise"
           type="button"
-          onClick={() => {
-            const block=createWorkoutExerciseDraft()
-            onChange((current) => ({ ...current,exercises: [...current.exercises,block] }))
-          }}
+          aria-haspopup="dialog"
+          onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); setPicker({}) }}
         >
           + Ajouter un exercice
         </button>
@@ -395,6 +421,8 @@ function WorkoutEditor({ draft,storedRecords,onChange,onOpenRecords,showErrors=f
           onChange((current) => ({ ...current,notes: { ...current.notes,[category]: text } }))
         } />
       </details>
+      {picker&&<ExercisePicker currentExerciseId={draft.exercises.find((block) => block.id===picker.blockId)?.exerciseId}
+        onSelect={chooseExercise} onCancel={() => setPicker(null)} />}
       {pendingRemoval&&(
         <WorkoutConfirmation title="Retirer cet exercice ?" confirmLabel="Retirer l’exercice"
           onCancel={() => setPendingRemoval(null)} onConfirm={() => removeExercise(pendingRemoval.id)}>

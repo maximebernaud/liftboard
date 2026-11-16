@@ -468,7 +468,7 @@ try {
       assert.equal(await count(), '3 séances')
       await enter('#history-date', '2026-11-10')
       assert.equal(await count(), '1 séance')
-      await select('#history-exercise', 'back-squat')
+      await select('#history-exercise', 'front-squat')
       assert.equal(await count(), '0 séance')
       assert.equal(await evaluate('Boolean(document.querySelector("#history-filter-empty-title"))'), true)
       await click('Effacer les filtres', '.workout-history')

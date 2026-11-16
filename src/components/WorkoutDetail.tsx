@@ -1,4 +1,4 @@
-import { exercises } from '../data/personalRecords'
+import { exercises } from '../data/exercises'
 import { getWorkoutProgress, hasWorkoutExecution } from '../lib/workoutExecution'
 import type { Workout } from '../types/workout'
 import WorkoutSetSummary from './WorkoutSetSummary'

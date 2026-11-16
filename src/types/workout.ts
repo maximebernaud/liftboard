@@ -1,4 +1,4 @@
-import type { Exercise } from '../data/personalRecords'
+import type { Exercise } from '../data/exercises'
 import type { RoundingIncrement } from '../lib/loadCalculator'
 
 export type WorkoutSetRounding =

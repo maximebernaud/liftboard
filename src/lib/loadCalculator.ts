@@ -33,6 +33,23 @@ export function decimalParts(value: number): { coefficient: bigint; scale: numbe
     : { coefficient, scale }
 }
 
+function percentageParts(oneRepMaxKg: number, intensityPct: number): { coefficient: bigint; scale: number } {
+  const record = decimalParts(oneRepMaxKg)
+  const intensity = decimalParts(intensityPct)
+  return { coefficient: record.coefficient * intensity.coefficient, scale: record.scale + intensity.scale + 2 }
+}
+
+/** Noyau décimal commun. Chaque appelant conserve sa propre borne d'intensité.
+ * Un résultat non représentable (zéro ou Infinity) doit être refusé par l'appelant.
+ */
+export function calculateExactPercentageLoad(oneRepMaxKg: number, intensityPct: number): number {
+  if (!Number.isFinite(oneRepMaxKg) || oneRepMaxKg <= 0 || !Number.isFinite(intensityPct) || intensityPct <= 0) {
+    throw new RangeError('La référence et l’intensité doivent être finies et strictement positives.')
+  }
+  const { coefficient, scale } = percentageParts(oneRepMaxKg, intensityPct)
+  return Number(`${coefficient}e-${scale}`)
+}
+
 /** Arrondi choisi par l'utilisateur, sans modifier les multiples déjà exacts.
  * Les divisions entières évitent les erreurs de précision des divisions flottantes.
  */
@@ -79,10 +96,7 @@ export function calculateLoad(
     throw new RangeError('L’incrément doit être 1, 2,5 ou 5 kg, ou aucun arrondi.')
   }
 
-  const record = decimalParts(oneRepMaxKg)
-  const intensity = decimalParts(intensityPct)
-  const coefficient = record.coefficient * intensity.coefficient
-  const scale = record.scale + intensity.scale + 2
+  const { coefficient, scale } = percentageParts(oneRepMaxKg, intensityPct)
   const exactKg = Number(`${coefficient}e-${scale}`)
 
   if (roundingIncrement === null) return { exactKg, roundedKg: exactKg }

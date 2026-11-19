@@ -1,4 +1,4 @@
-import type { Exercise } from '../data/exercises'
+import type { Exercise, ExerciseId } from '../data/exercises'
 import type { RoundingIncrement } from '../lib/loadCalculator'
 
 export type WorkoutSetRounding =
@@ -75,3 +75,57 @@ export type WorkoutDraftErrors = {
 export type WorkoutDraftValidation =
   | { valid: true; workout: Workout; errors: WorkoutDraftErrors }
   | { valid: false; workout: null; errors: WorkoutDraftErrors }
+
+// Contrats E2 préparés uniquement : les composants et le stockage public restent en V1.
+export type LegacyWorkoutSet = WorkoutSet & { schemaVersion?: never }
+export type TrackingKind = 'load-reps' | 'reps' | 'duration'
+
+export type ReferenceSnapshot = Readonly<{
+  source: 'record'
+  exerciseId: ExerciseId
+  exerciseName: string
+  oneRepMaxKg: number
+}>
+
+export type LoadPlan =
+  | { method: 'manual'; loadKg: number }
+  | {
+      method: 'percentage'
+      intensityPct: number
+      rounding: WorkoutSetRounding
+      reference: ReferenceSnapshot
+      load: WorkoutLoad
+    }
+
+export type LoadRepsExecution =
+  | {
+      completed: false
+      reps: number | null
+      loadKg: number | null
+      cleared?: Partial<Record<'reps' | 'loadKg', true>>
+    }
+  | { completed: true; reps: number; loadKg: number }
+
+export type RepsExecution =
+  | { completed: false; reps: number | null; cleared?: Partial<Record<'reps', true>> }
+  | { completed: true; reps: number }
+
+export type DurationExecution =
+  | {
+      completed: false
+      durationSeconds: number | null
+      cleared?: Partial<Record<'durationSeconds', true>>
+    }
+  | { completed: true; durationSeconds: number }
+
+export type WorkoutSetV2 = { schemaVersion: 2; id: string } & (
+  | { kind: 'load-reps'; reps: number; loading: LoadPlan | null; execution?: LoadRepsExecution }
+  | { kind: 'reps'; reps: number; execution?: RepsExecution }
+  | { kind: 'duration'; durationSeconds: number; execution?: DurationExecution }
+)
+
+export type StoredWorkoutSet = LegacyWorkoutSet | WorkoutSetV2
+export type StoredWorkoutExercise = Omit<WorkoutExercise, 'sets'> & { sets: StoredWorkoutSet[] }
+// E2-B : une sauvegarde V2 sera nécessaire pour une série E2 OU un Record étendu.
+// Les données entièrement historiques pourront garder l'enveloppe V1.
+export type StoredWorkout = Omit<Workout, 'exercises'> & { exercises: StoredWorkoutExercise[] }

@@ -1,6 +1,4 @@
-import { exercises } from './exercises.ts'
-import { isValidWorkoutDate, isWorkoutSetRounding } from '../lib/workoutDraft.ts'
-import { roundLoadDirected } from '../lib/loadCalculator.ts'
+import { isLegacyWorkout } from '../lib/workoutSchema.ts'
 import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution, workoutProgramSignature } from '../lib/workoutExecution.ts'
 import { workoutCompletionError } from '../lib/workoutHistory.ts'
 import type { Workout, WorkoutNotes, WorkoutNoteCategory, WorkoutSetExecution } from '../types/workout.ts'
@@ -12,43 +10,13 @@ export type WorkoutsResult = { ok: true; workouts: Workout[] } | { ok: false; er
 const invalidData = 'Les séances stockées sont illisibles ou incompatibles. Elles sont conservées ; les écritures sont bloquées pour les protéger.'
 const conflict = 'Cette séance a changé depuis son ouverture. Vos saisies sont conservées. Revenez aux séances puis rouvrez la version actuelle avant de modifier à nouveau.'
 const fail = (error: string): WorkoutsResult => ({ ok: false, error })
-const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 const identifier = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 
-export function isWorkoutNotes(value: unknown): value is WorkoutNotes {
-  return object(value) && typeof value.before === 'string' && typeof value.during === 'string' && typeof value.after === 'string'
-}
+export { isWorkoutNotes } from '../lib/workoutSchema.ts'
 
 export function isWorkout(value: unknown): value is Workout {
-  if (!object(value) || !identifier(value.id) || typeof value.title !== 'string' || !value.title.trim() ||
-    typeof value.date !== 'string' || !isValidWorkoutDate(value.date) ||
-    (value.status !== 'planned' && value.status !== 'completed') || !isWorkoutNotes(value.notes) ||
-    !Array.isArray(value.exercises) || !value.exercises.length) return false
-
-  const ids = new Set<string>([value.id])
-  function uniqueId(id: unknown): boolean {
-    if (!identifier(id) || ids.has(id)) return false
-    ids.add(id)
-    return true
-  }
-  return value.exercises.every((block: unknown) => {
-    if (!object(block) || !uniqueId(block.id) || !exercises.some((item) => item.id === block.exerciseId) ||
-      !Array.isArray(block.sets) || !block.sets.length) return false
-    return block.sets.every((set: unknown) => {
-      if (!object(set) || !uniqueId(set.id) || typeof set.reps !== 'number' ||
-        !Number.isSafeInteger(set.reps) || set.reps <= 0 || typeof set.intensityPct !== 'number' ||
-        !Number.isFinite(set.intensityPct) || set.intensityPct < 1 || set.intensityPct > 100 ||
-        !isWorkoutSetRounding(set.rounding) ||
-        ('execution' in set && !isWorkoutSetExecution(set.execution))) return false
-      if (set.load === null) return true
-      if (!object(set.load) || typeof set.load.exactKg !== 'number' || !Number.isFinite(set.load.exactKg) ||
-        set.load.exactKg <= 0 || typeof set.load.selectedKg !== 'number' || !Number.isFinite(set.load.selectedKg) ||
-        set.load.selectedKg < 0) return false
-      const selected = set.rounding.mode === 'exact' ? set.load.exactKg
-        : roundLoadDirected(set.load.exactKg, set.rounding.increment, set.rounding.mode)
-      return selected === set.load.selectedKg
-    })
-  })
+  // Ne pas activer le lecteur mixte avant que tous les écrans soient compatibles.
+  return isLegacyWorkout(value)
 }
 
 export function isWorkouts(value: unknown): value is Workout[] {
@@ -72,10 +40,18 @@ export function loadWorkouts(storage?: WorkoutStorage): WorkoutsResult {
 }
 
 function writeWorkouts(workouts: Workout[], storage?: WorkoutStorage): WorkoutsResult {
+  let verifying = false
   try {
-    (storage ?? window.localStorage).setItem(workoutsStorageKey, JSON.stringify(workouts))
+    const target = storage ?? window.localStorage
+    const serialized = JSON.stringify(workouts)
+    target.setItem(workoutsStorageKey, serialized)
+    verifying = true
+    if (target.getItem(workoutsStorageKey) !== serialized) {
+      return fail('L’enregistrement des séances n’a pas pu être confirmé. Vos saisies restent en mémoire. Vérifiez les données persistées avant de réessayer.')
+    }
     return { ok: true, workouts }
   } catch (error) {
+    if (verifying) return fail('L’écriture a été effectuée, mais sa vérification est impossible. Vos saisies restent en mémoire ; l’état persistant doit être vérifié avant de réessayer.')
     return fail(error instanceof Error && error.name === 'QuotaExceededError'
       ? 'Stockage local plein. Aucune modification enregistrée. Vos saisies restent en mémoire ; libérez de l’espace puis réessayez.'
       : 'Impossible d’écrire dans le stockage local. Aucune modification enregistrée. Vos saisies restent en mémoire ; réessayez.')

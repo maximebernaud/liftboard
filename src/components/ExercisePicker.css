@@ -191,6 +191,16 @@
   font-weight: 600;
 }
 
+.exercise-picker-scroll > section > h3 {
+  margin-top: var(--lb-space-6);
+  color: var(--lb-color-accent);
+  font-family: var(--lb-font-body);
+  font-size: var(--lb-text-xs);
+  line-height: var(--lb-leading-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .exercise-picker-list {
   margin: var(--lb-space-2) 0 0;
   padding: 0;

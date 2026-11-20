@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
-  exercises,
-  type Exercise,
   type RecordMutation,
   type RecordsLoadResult,
 } from '../data/personalRecords'
 import ExerciseCard from './ExerciseCard'
+import { exercises, isRecordExerciseId, type Exercise } from '../data/exercises'
+import ExercisePicker from './ExercisePicker'
 import WorkoutConfirmation from './WorkoutConfirmation'
 import { recordDiscardMessage, type RecordEditDraft } from '../lib/recordDiscard'
 import './PersonalRecords.css'
@@ -23,6 +23,8 @@ function PersonalRecords({ isActive, storedRecords, onPersist, onReload, onPendi
   const [unsavedDraft, setUnsavedDraft] = useState<RecordEditDraft | null>(null)
   const hasUnsavedChanges = unsavedDraft !== null
   const [pendingExerciseId, setPendingExerciseId] = useState<Exercise['id'] | null>(null)
+  const [picker, setPicker] = useState(false)
+  const [addedExerciseId, setAddedExerciseId] = useState<Exercise['id'] | null>(null)
   useEffect(() => { onPendingChange(editingExerciseId !== null) }, [editingExerciseId, onPendingChange])
 
   useEffect(() => {
@@ -37,14 +39,21 @@ function PersonalRecords({ isActive, storedRecords, onPersist, onReload, onPendi
 
   function changeEditor(exerciseId: Exercise['id']) {
     if (hasUnsavedChanges) { setPendingExerciseId(exerciseId); return }
+    setAddedExerciseId(exerciseId)
     setEditingExerciseId(exerciseId)
   }
 
   const { records, error } = storedRecords
+  const displayed = exercises.filter((exercise) => isRecordExerciseId(exercise.id) ||
+    records?.some((record) => record.exerciseId === exercise.id) || exercise.id === editingExerciseId ||
+    exercise.id === addedExerciseId || exercise.id === pendingExerciseId)
+  const categoryOf = (exercise: Exercise) => 'category' in exercise ? exercise.category : 'Autres mouvements'
   const discardMessage = unsavedDraft && pendingExerciseId ? recordDiscardMessage(unsavedDraft, pendingExerciseId) : null
 
   return (
     <>
+      <button className="record-button records-add-movement" type="button" disabled={records === null}
+        aria-haspopup="dialog" onClick={() => setPicker(true)}>Ajouter un mouvement</button>
       {records === null && (
         <div className="records-storage-error">
           <p role="alert">{error}</p>
@@ -56,14 +65,14 @@ function PersonalRecords({ isActive, storedRecords, onPersist, onReload, onPendi
       )}
       {(records !== null || editingExerciseId !== null) && (
         <div className="records-catalog">
-          {[...new Set(exercises.map((exercise) => exercise.category))].map((category, index) => (
+          {[...new Set(displayed.map(categoryOf))].map((category, index) => (
             <section className="records-group" key={category} aria-labelledby={`records-category-${index}`}>
               <div className="records-group-heading">
                 <h2 id={`records-category-${index}`}>{category}</h2>
                 <span aria-hidden="true">Record 1RM</span>
               </div>
               <ul className="exercise-grid">
-                {exercises.filter((exercise) => exercise.category === category).map((exercise) => (
+                {displayed.filter((exercise) => categoryOf(exercise) === category).map((exercise) => (
                   <li key={exercise.id} id={`record-${exercise.id}-row`}>
                     <ExerciseCard
                       exercise={exercise}
@@ -72,7 +81,7 @@ function PersonalRecords({ isActive, storedRecords, onPersist, onReload, onPendi
                       isEditing={editingExerciseId === exercise.id}
                       isActive={isActive}
                       onStartEditing={() => changeEditor(exercise.id)}
-                      onStopEditing={() => { setEditingExerciseId(null); setUnsavedDraft(null) }}
+                      onStopEditing={() => { setEditingExerciseId(null); setUnsavedDraft(null); setAddedExerciseId(null) }}
                       onDirtyChange={setUnsavedDraft}
                       onSave={(oneRepMaxKg, original) => onPersist({ exerciseId: exercise.id, original, oneRepMaxKg })}
                       onDelete={(original) => onPersist({ exerciseId: exercise.id, original, oneRepMaxKg: null })}
@@ -87,11 +96,17 @@ function PersonalRecords({ isActive, storedRecords, onPersist, onReload, onPendi
       <p className="records-storage-note records-footer">
         Vos records sont enregistrés uniquement dans ce navigateur, sur cet appareil.
       </p>
+      {picker && <ExercisePicker purpose="record" onCancel={() => setPicker(false)} onSelect={(id) => {
+        setAddedExerciseId(id)
+        setPicker(false)
+        requestAnimationFrame(() => document.getElementById(`record-${id}-row`)?.querySelector<HTMLButtonElement>('.record-actions button')?.click())
+      }} />}
       {pendingExerciseId && discardMessage && (
         <WorkoutConfirmation title="Modifications non enregistrées" cancelLabel="Continuer à modifier" confirmLabel="Abandonner les modifications"
-          onCancel={() => setPendingExerciseId(null)}
+          onCancel={() => { setPendingExerciseId(null); setAddedExerciseId(editingExerciseId) }}
           onConfirm={() => {
             setEditingExerciseId(pendingExerciseId)
+            setAddedExerciseId(pendingExerciseId)
             setUnsavedDraft(null)
             setPendingExerciseId(null)
           }}>

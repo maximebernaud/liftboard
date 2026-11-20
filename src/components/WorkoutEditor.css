@@ -626,3 +626,18 @@
     scroll-margin-block: var(--lb-space-4);
   }
 }
+.workout-e2-load-fields {
+  display: grid;
+  gap: var(--lb-space-4);
+  margin-top: var(--lb-space-4);
+  min-width: 0;
+}
+
+.workout-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lb-space-2);
+  margin-top: var(--lb-space-2);
+}
+
+.workout-load-method { margin-bottom: var(--lb-space-4); }

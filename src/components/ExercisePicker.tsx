@@ -6,12 +6,13 @@ import { normalizeExerciseSearch, recentExercises, searchExercises, type Exercis
 import './ExercisePicker.css'
 
 type Props = {
+  purpose?: 'record'
   currentExerciseId?: ExerciseId
   onSelect: (id: ExerciseId) => void
   onCancel: () => void
 }
 
-export default function ExercisePicker({ currentExerciseId, onSelect, onCancel }: Props) {
+export default function ExercisePicker({ currentExerciseId, onSelect, onCancel, purpose }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   const search = useRef<HTMLInputElement>(null)
   const id = useId()
@@ -111,7 +112,7 @@ export default function ExercisePicker({ currentExerciseId, onSelect, onCancel }
     <div className="exercise-picker-header">
       <div>
         <p className="exercise-picker-kicker">Bibliothèque<span> / {exercises.length} mouvements</span></p>
-        <h2 id={`${id}-title`}>{currentExerciseId ? 'Changer de mouvement' : 'Choisir un exercice'}</h2>
+        <h2 id={`${id}-title`}>{purpose === 'record' ? 'Ajouter un mouvement' : currentExerciseId ? 'Changer de mouvement' : 'Choisir un exercice'}</h2>
       </div>
       <button className="exercise-picker-close" type="button" onClick={onCancel} aria-label="Fermer le sélecteur d’exercices">✕</button>
     </div>
@@ -173,7 +174,7 @@ export default function ExercisePicker({ currentExerciseId, onSelect, onCancel }
       </section>}
     </div>
     <div className="exercise-picker-footer">
-      <p>Choisis un mouvement pour {currentExerciseId ? 'remplacer celui du bloc' : 'l’ajouter à ta séance'}.</p>
+      <p>{purpose === 'record' ? 'Choisis un mouvement pour renseigner son 1RM ou ouvrir son Record existant.' : `Choisis un mouvement pour ${currentExerciseId ? 'remplacer celui du bloc' : 'l’ajouter à ta séance'}.`}</p>
       <button className="record-button" type="button" onClick={onCancel}>Annuler</button>
     </div>
   </dialog>

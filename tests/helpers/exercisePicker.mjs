@@ -24,6 +24,9 @@ export function exercisePickerActions({ call, click, settle }) {
     }, scope)
     await settle()
     await chooseExercise(exerciseId)
+    // E2-B : les charges historiques figées demandent un accord avant recalcul.
+    const needsConfirmation = await call(() => [...document.querySelectorAll('dialog[open] h3')].some(title => title.textContent === 'Changer le mouvement ?'))
+    if (needsConfirmation) await click('Changer le mouvement', 'dialog[open]')
   }
   return { addExercise, changeExercise, chooseExercise }
 }

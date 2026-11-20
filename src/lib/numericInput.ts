@@ -2,10 +2,12 @@ import { parseOneRepMax } from '../data/personalRecords.ts'
 import { decimalParts, parseIntensity } from './loadCalculator.ts'
 import { parseRepetitions } from './workoutDraft.ts'
 import { parseExecutionLoad, parseExecutionReps } from './workoutExecution.ts'
+import { parseWorkoutIntensityV2 } from './workoutProgramming.ts'
 
-export type NumericField = 'record' | 'intensity' | 'reps' | 'execution-reps' | 'execution-load'
+export type NumericField = 'record' | 'intensity' | 'workout-intensity' | 'reps' | 'execution-reps' | 'execution-load'
 const parsers = {
   record: parseOneRepMax, intensity: parseIntensity, reps: parseRepetitions,
+  'workout-intensity': parseWorkoutIntensityV2,
   'execution-reps': parseExecutionReps, 'execution-load': parseExecutionLoad,
 }
 
@@ -29,6 +31,7 @@ export function stepNumericInput(input: string, field: NumericField, direction: 
     if (decimal.coefficient * 10n ** BigInt(precision) !== nextUnits * 10n ** BigInt(decimal.scale)) return input
   }
   if (field === 'intensity') next = Math.min(100, Math.max(1, next))
+  if (field === 'workout-intensity') next = Math.min(300, Math.max(1, next))
   // Pas de minimum artificiel pour un 1RM, ni de dépassement de la précision JS.
   if (!Number.isFinite(next) || next <= 0 || (integerField && !Number.isSafeInteger(next)) || next === value) return input
   return String(next).replace('.', input.includes('.') ? '.' : ',')

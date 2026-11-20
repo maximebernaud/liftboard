@@ -129,7 +129,7 @@ describe('validation sans écriture', () => {
 
   it('refuse JSON invalide, mauvais format, version et métadonnées incompatibles', () => {
     for (const input of ['', '{invalid', '[]', 'null', '{"format":"other"}']) assert.equal(parseBackup(input).ok, false)
-    for (const patch of [{ version: 2 }, { version: '1' }, { exportedAt: 'hier' }, { exportedAt: '2026-02-30T12:00:00.000Z' }]) {
+    for (const patch of [{ version: 99 }, { version: '1' }, { exportedAt: 'hier' }, { exportedAt: '2026-02-30T12:00:00.000Z' }]) {
       assert.equal(validateBackup({ ...fixture(), ...patch }).ok, false)
     }
   })

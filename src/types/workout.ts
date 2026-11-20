@@ -129,3 +129,29 @@ export type StoredWorkoutExercise = Omit<WorkoutExercise, 'sets'> & { sets: Stor
 // E2-B : une sauvegarde V2 sera nécessaire pour une série E2 OU un Record étendu.
 // Les données entièrement historiques pourront garder l'enveloppe V1.
 export type StoredWorkout = Omit<Workout, 'exercises'> & { exercises: StoredWorkoutExercise[] }
+
+// Contrat public E2-B : les autres suivis V2 restent réservés à E2-C.
+export type LoadedWorkoutSetV2 = Extract<WorkoutSetV2, { kind: 'load-reps' }>
+export type AppWorkoutSet = LegacyWorkoutSet | LoadedWorkoutSetV2
+export type AppWorkoutExercise = Omit<WorkoutExercise, 'sets'> & { sets: AppWorkoutSet[] }
+export type AppWorkout = Omit<Workout, 'exercises'> & { exercises: AppWorkoutExercise[] }
+
+export type E2LoadDraft = {
+  method: 'legacy' | 'percentage' | 'manual' | 'none'
+  manualInput: string
+  intensityInput: string
+  rounding: WorkoutSetRounding
+  reference: ReferenceSnapshot | null
+  savedPlan?: Extract<LoadPlan, { method: 'percentage' }>
+}
+export type AppSetDraft = WorkoutSetDraft & { e2?: E2LoadDraft }
+export type AppExerciseDraft = Omit<WorkoutExerciseDraft, 'sets'> & { sets: AppSetDraft[] }
+export type AppWorkoutDraft = Omit<WorkoutDraft, 'exercises'> & { exercises: AppExerciseDraft[] }
+export type AppDraftErrors = Omit<WorkoutDraftErrors, 'blocks'> & {
+  blocks: Record<string, { exercise?: string; sets?: string; fields: Record<string, {
+    reps?: string; intensity?: string; rounding?: string; reference?: string; load?: string
+  }> }>
+}
+export type AppDraftValidation =
+  | { valid: true; workout: AppWorkout; errors: AppDraftErrors }
+  | { valid: false; workout: null; errors: AppDraftErrors }

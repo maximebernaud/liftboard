@@ -243,3 +243,4 @@
     min-inline-size: min(100%, 9em);
   }
 }
+.records-add-movement { margin-bottom: var(--lb-space-5); }

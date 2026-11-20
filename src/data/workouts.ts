@@ -1,7 +1,8 @@
-import { isLegacyWorkout } from '../lib/workoutSchema.ts'
-import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution, workoutProgramSignature } from '../lib/workoutExecution.ts'
+import { isAppWorkout, isLoadRepsExecution } from '../lib/workoutSchema.ts'
+import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution } from '../lib/workoutExecution.ts'
+import { storedWorkoutProgramSignature as workoutProgramSignature, sameStoredSetExecution } from '../lib/workoutComparison.ts'
 import { workoutCompletionError } from '../lib/workoutHistory.ts'
-import type { Workout, WorkoutNotes, WorkoutNoteCategory, WorkoutSetExecution } from '../types/workout.ts'
+import type { AppWorkout as Workout, WorkoutNotes, WorkoutNoteCategory, WorkoutSetExecution } from '../types/workout.ts'
 
 export const workoutsStorageKey = 'liftboard.workouts.v1'
 export type WorkoutStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -15,8 +16,7 @@ const identifier = (value: unknown): value is string => typeof value === 'string
 export { isWorkoutNotes } from '../lib/workoutSchema.ts'
 
 export function isWorkout(value: unknown): value is Workout {
-  // Ne pas activer le lecteur mixte avant que tous les écrans soient compatibles.
-  return isLegacyWorkout(value)
+  return isAppWorkout(value)
 }
 
 export function isWorkouts(value: unknown): value is Workout[] {
@@ -138,10 +138,10 @@ export function updateWorkoutSetExecution(
   const previousSet = original.exercises.find((block) => block.id === blockId)?.sets.find((set) => set.id === setId)
   const latestSet = latest.exercises.find((block) => block.id === blockId)?.sets.find((set) => set.id === setId)
   if (!previousSet || !latestSet) return fail('Cette série n’existe plus. Vos saisies restent en mémoire.')
-  if (!sameExecution(latestSet.execution, previousSet.execution) && !sameExecution(latestSet.execution, execution)) {
+  if (!sameStoredSetExecution(latestSet, previousSet) && !sameExecution(latestSet.execution, execution)) {
     return fail('Les résultats de cette série ont changé ailleurs. Vos saisies restent en mémoire. Revenez à la séance puis rouvrez le suivi pour consulter la version enregistrée avant de corriger.')
   }
-  if (!isWritableExecution(execution, latestSet.execution)) {
+  if (!isWritableExecution(execution, latestSet.execution) || (latestSet.schemaVersion === 2 && !isLoadRepsExecution(execution))) {
     return fail('Résultat invalide : répétitions entières et charge strictement positives, dans les limites numériques sûres. Aucune modification enregistrée.')
   }
   const updated: Workout = {
@@ -171,7 +171,7 @@ function transitionWorkoutStatus(original: Workout, status: Workout['status'], s
   }
   if (workoutProgramSignature(latest) !== workoutProgramSignature(original) ||
     latest.exercises.some((block, index) => block.sets.some((set, number) =>
-      !sameExecution(set.execution, original.exercises[index].sets[number].execution)))) {
+      !sameStoredSetExecution(set, original.exercises[index].sets[number])))) {
     return fail('La programmation ou les performances de cette séance ont changé. Revenez à la liste puis consultez la version actuelle avant de confirmer à nouveau.')
   }
   if (status === 'completed') {

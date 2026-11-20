@@ -1,5 +1,6 @@
+import { plannedSetLoad } from './workoutPresentation.ts'
 import { decimalParts } from './loadCalculator.ts'
-import type { Workout, WorkoutSet, WorkoutSetExecution } from '../types/workout.ts'
+import type { AppWorkout as Workout, AppWorkoutSet as WorkoutSet, Workout as LegacyWorkout, WorkoutSetExecution } from '../types/workout.ts'
 
 // null = champ intact, '' = effacement volontaire, autre texte = saisie réelle.
 export type ExecutionInputs = { reps: string | null; loadKg: string | null }
@@ -78,7 +79,7 @@ export function confirmSetExecution(
   inputs: ExecutionInputs,
 ): { execution: WorkoutSetExecution | null; errors: Partial<Record<keyof ExecutionInputs, string>> } {
   const reps = inputs.reps === null ? set.reps : parseExecutionReps(inputs.reps)
-  const loadKg = inputs.loadKg === null ? set.load?.selectedKg ?? null : parseExecutionLoad(inputs.loadKg)
+  const loadKg = inputs.loadKg === null ? plannedSetLoad(set)?.selectedKg ?? null : parseExecutionLoad(inputs.loadKg)
   const errors: Partial<Record<keyof ExecutionInputs, string>> = {}
   if (!validReps(reps)) errors.reps = 'Renseignez un nombre entier de répétitions strictement positif.'
   if (!validLoad(loadKg)) errors.loadKg = 'Renseignez la charge réellement soulevée, strictement positive et dans les limites numériques sûres.'
@@ -130,7 +131,7 @@ export function sameExecution(left: WorkoutSetExecution | undefined, right: Work
 }
 
 // Ignorer les notes et les autres résultats ; comparer toute la programmation.
-export function workoutProgramSignature(workout: Workout): string {
+export function workoutProgramSignature(workout: LegacyWorkout): string {
   return JSON.stringify([
     workout.id, workout.title, workout.date, workout.status,
     workout.exercises.map((block) => [block.id, block.exerciseId, block.sets.map((set) => [

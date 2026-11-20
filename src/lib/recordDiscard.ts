@@ -1,4 +1,5 @@
-import { exercises, parseOneRepMax, type Exercise, type PersonalRecord } from '../data/personalRecords.ts'
+import { exercises, type Exercise } from '../data/exercises.ts'
+import { parseOneRepMax, type PersonalRecord } from '../data/personalRecords.ts'
 
 export type RecordEditDraft = {
   exerciseId: Exercise['id']
@@ -8,7 +9,7 @@ export type RecordEditDraft = {
 
 /** Décrit le brouillon d'ouverture, sans relire ni modifier sa référence de conflit. */
 export function recordDiscardMessage(draft: RecordEditDraft, destinationId?: Exercise['id']): { change: string; consequence: string } {
-  const movement = exercises.find((exercise) => exercise.id === draft.exerciseId)!.name
+  const movement = exercises.find((exercise) => exercise.id === draft.exerciseId)?.name ?? 'ce mouvement'
   const destination = exercises.find((exercise) => exercise.id === destinationId && exercise.id !== draft.exerciseId)
   const formatKg = (value: number) => `${value.toString().replace('.', ',')} kg`
   const previous = draft.original ? formatKg(draft.original.oneRepMaxKg) : null

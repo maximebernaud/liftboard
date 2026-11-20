@@ -1,10 +1,10 @@
-import { recordExercises as exercises, type RecordExercise as Exercise } from './exercises.ts'
+import { isExerciseId, isRecordExerciseId, type ExerciseId } from './exercises.ts'
 
-// Vue volontairement restreinte pour conserver les contrats Records / Calculer.
+// Vue volontairement restreinte pour conserver le contrat du Calculateur autonome.
 export { recordExercises as exercises, type RecordExercise as Exercise } from './exercises.ts'
 
 export type PersonalRecord = {
-  exerciseId: string
+  exerciseId: ExerciseId
   oneRepMaxKg: number
 }
 
@@ -15,7 +15,7 @@ export type RecordsLoadResult =
 export const recordsStorageKey = 'liftboard.personal-records.v1'
 
 export type RecordMutation = {
-  exerciseId: Exercise['id']
+  exerciseId: ExerciseId
   original: PersonalRecord | null
   oneRepMaxKg: number | null // null demande un effacement explicite.
 }
@@ -40,7 +40,7 @@ function isPersonalRecord(value: unknown): value is PersonalRecord {
 
   return (
     'exerciseId' in value &&
-    exercises.some((exercise) => exercise.id === value.exerciseId) &&
+    isExerciseId(value.exerciseId) &&
     'oneRepMaxKg' in value &&
     typeof value.oneRepMaxKg === 'number' &&
     Number.isFinite(value.oneRepMaxKg) &&
@@ -51,6 +51,10 @@ function isPersonalRecord(value: unknown): value is PersonalRecord {
 export function isPersonalRecords(value: unknown): value is PersonalRecord[] {
   return Array.isArray(value) && value.every(isPersonalRecord) &&
     new Set(value.map((record) => record.exerciseId)).size === value.length
+}
+
+export function isLegacyPersonalRecords(value: unknown): value is PersonalRecord[] {
+  return isPersonalRecords(value) && value.every((record) => isRecordExerciseId(record.exerciseId))
 }
 
 export function loadPersonalRecords(storage?: Pick<Storage, 'getItem'>): RecordsLoadResult {
@@ -80,7 +84,7 @@ export function loadPersonalRecords(storage?: Pick<Storage, 'getItem'>): Records
  */
 export function mutatePersonalRecord(mutation: RecordMutation, storage?: RecordsStorage): RecordsMutationResult {
   const { exerciseId, original, oneRepMaxKg } = mutation
-  if (!exercises.some((exercise) => exercise.id === exerciseId) ||
+  if (!isExerciseId(exerciseId) ||
     (original !== null && (!isPersonalRecord(original) || original.exerciseId !== exerciseId)) ||
     (oneRepMaxKg !== null && (!Number.isFinite(oneRepMaxKg) || oneRepMaxKg <= 0))) {
     return { ok: false, error: 'Record invalide. Aucune modification enregistrée.' }

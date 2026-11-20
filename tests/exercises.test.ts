@@ -78,15 +78,15 @@ describe('catalogue canonique E1', () => {
     assert.equal(isExerciseId('farmer-carry'), false, 'La distance est hors E1')
   })
 
-  it('reconnaît chaque ID dans les séances sans élargir les Records ou leurs mutations', () => {
+  it('reconnaît chaque ID dans les séances et accepte les Records étendus E2-B', () => {
     assert.equal(typesCompatible, true)
     const source = workout('tous', exercises.map((exercise) => exercise.id))
     assert.equal(isWorkout(source), true)
-    assert.equal(isPersonalRecords([{ exerciseId: 'power-snatch', oneRepMaxKg: 80 }]), false)
+    assert.equal(isPersonalRecords([{ exerciseId: 'power-snatch', oneRepMaxKg: 80 }]), true)
     const storage = memory()
-    const result = mutatePersonalRecord({ exerciseId: 'power-snatch' as 'snatch', original: null, oneRepMaxKg: 80 }, storage)
-    assert.equal(result.ok, false)
-    assert.equal(storage.values.size, 0)
+    const result = mutatePersonalRecord({ exerciseId: 'power-snatch', original: null, oneRepMaxKg: 80 }, storage)
+    assert.equal(result.ok, true)
+    assert.equal(storage.values.size, 1)
   })
 })
 

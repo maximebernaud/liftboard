@@ -1,6 +1,6 @@
 import { useRef,useState } from 'react'
 import { updateWorkoutNotes,type WorkoutsResult } from '../data/workouts'
-import type { Workout,WorkoutNoteCategory,WorkoutNotes } from '../types/workout'
+import type { AppWorkout as Workout,WorkoutNoteCategory,WorkoutNotes } from '../types/workout'
 import WorkoutConfirmation from './WorkoutConfirmation'
 import WorkoutNotesFields from './WorkoutNotesFields'
 

@@ -1,5 +1,5 @@
 import { exercises, isExerciseId, type Exercise, type ExerciseFamily } from '../data/exercises.ts'
-import type { Workout } from '../types/workout.ts'
+import type { AppWorkout as Workout } from '../types/workout.ts'
 
 export type ExerciseFamilyFilter = ExerciseFamily | 'all'
 

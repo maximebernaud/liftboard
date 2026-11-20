@@ -1,6 +1,6 @@
 import { loadPersonalRecords, recordsStorageKey } from './personalRecords.ts'
 import { loadWorkouts, workoutsStorageKey } from './workouts.ts'
-import { backupFormat, backupSizeError, backupVersion, validateBackup, type BackupResult, type DataBackup } from '../lib/dataBackup.ts'
+import { backupFormat, backupSizeError, requiredBackupVersion, validateBackup, type BackupResult, type DataBackup } from '../lib/dataBackup.ts'
 import { localDateString } from '../lib/workoutDraft.ts'
 
 export type BackupStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -19,7 +19,7 @@ export function exportBackup(storage?: BackupStorage, date = new Date()): Backup
     if (records.error !== null) return { ok: false, error: `Export impossible. ${records.error}` }
     if (!workouts.ok) return { ok: false, error: `Export impossible. ${workouts.error}` }
     const backup: DataBackup = {
-      format: backupFormat, version: backupVersion, exportedAt: date.toISOString(),
+      format: backupFormat, version: requiredBackupVersion(records.records, workouts.workouts), exportedAt: date.toISOString(),
       data: { records: records.records, workouts: workouts.workouts },
     }
     const json = JSON.stringify(backup, null, 2)

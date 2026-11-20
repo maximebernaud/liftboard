@@ -1,6 +1,6 @@
 import { exercises } from '../data/exercises'
 import { getWorkoutProgress, hasWorkoutExecution } from '../lib/workoutExecution'
-import type { Workout } from '../types/workout'
+import type { AppWorkout as Workout } from '../types/workout'
 import WorkoutSetSummary from './WorkoutSetSummary'
 
 export default function WorkoutDetail({ workout, onEdit, onNotes, onDelete, onTrack, onReopen, forge = false, onBack }: {

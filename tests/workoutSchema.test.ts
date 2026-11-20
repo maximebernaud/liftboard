@@ -112,7 +112,7 @@ describe('snapshot et méthodes de charge E2 stricts', () => {
   it('reconnaît Clean comme identité canonique sans supposer un Record public disponible', () => {
     const snapshot = percentagePlan().reference
     assert.equal(isReferenceSnapshot(snapshot), true)
-    assert.equal(isPersonalRecords([{ exerciseId: 'clean', oneRepMaxKg: 100 }]), false)
+    assert.equal(isPersonalRecords([{ exerciseId: 'clean', oneRepMaxKg: 100 }]), true)
   })
 
   it('refuse source, identité, nom, valeur ou propriétés de snapshot invalides', () => {
@@ -250,14 +250,14 @@ describe('séries et exécutions E2 selon leur type', () => {
   })
 })
 
-describe('structures mixtes futures sans activation des lecteurs publics', () => {
+describe('structures mixtes E2 et restrictions publiques E2-C', () => {
   it('reconnaît V1 et E2 chargée dans un même bloc, avec méthodes différentes', () => {
     const source = stored([legacySet(), loadedSet(), { ...loadedSet(), id: 'manual', loading: { method: 'manual', loadKg: 85 } as const }])
     const before = structuredClone(source)
     assert.equal(isStoredWorkout(source), true)
     assert.equal(isStoredWorkouts([source]), true)
     assert.deepEqual(source, before)
-    assert.equal(isWorkout(source), false)
+    assert.equal(isWorkout(source), true)
   })
 
   it('autorise les trois suivis dans des blocs séparés, sans types contradictoires dans un bloc', () => {
@@ -290,7 +290,7 @@ describe('structures mixtes futures sans activation des lecteurs publics', () =>
     }
   })
 
-  it('refuse publiquement E2 et les hybrides en lecture/import/export sans toucher au stockage', () => {
+  it('refuse les hybrides et les suivis E2-C en lecture/import/export sans toucher au stockage', () => {
     const values = new Map<string, string>()
     let writes = 0
     const storage = {
@@ -298,7 +298,8 @@ describe('structures mixtes futures sans activation des lecteurs publics', () =>
       setItem: (key: string, value: string) => { writes++; values.set(key, value) },
       removeItem: (key: string) => { writes++; values.delete(key) },
     }
-    for (const source of [stored([loadedSet()]), stored([{ ...legacySet(), ...loadedSet() }])]) {
+    for (const source of [stored([{ schemaVersion: 2, id: 'time', kind: 'duration', durationSeconds: 45 }]),
+      stored([{ schemaVersion: 2, id: 'reps', kind: 'reps', reps: 10 }]), stored([{ ...legacySet(), ...loadedSet() }])]) {
       const raw = JSON.stringify([source])
       values.set(workoutsStorageKey, raw)
       assert.equal(loadWorkouts(storage).ok, false)
@@ -313,7 +314,7 @@ describe('structures mixtes futures sans activation des lecteurs publics', () =>
     }
   })
 
-  it('continue à exporter uniquement V1 et refuse les Records étendus', () => {
+  it('conserve l’export V1 historique et passe en V2 avec un Record étendu', () => {
     const source = legacyWorkout()
     const values = new Map([[workoutsStorageKey, JSON.stringify([source])]])
     const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: () => { throw new Error('Écriture interdite') }, removeItem: () => { throw new Error('Écriture interdite') } }
@@ -322,6 +323,8 @@ describe('structures mixtes futures sans activation des lecteurs publics', () =>
     assert.equal(result.value.backup.version, 1)
     assert.deepEqual(result.value.backup.data.workouts, [source])
     values.set(recordsStorageKey, '[{"exerciseId":"clean","oneRepMaxKg":100}]')
-    assert.equal(exportBackup(storage).ok, false)
+    const extended = exportBackup(storage)
+    assert.ok(extended.ok)
+    assert.equal(extended.value.backup.version, 2)
   })
 })

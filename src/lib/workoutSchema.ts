@@ -5,7 +5,7 @@ import { isWorkoutSetExecution } from './workoutExecution.ts'
 import { calculateWorkoutLoad, isPositiveSafeInteger, isPositiveSafeLoad } from './workoutProgramming.ts'
 import type {
   DurationExecution, LegacyWorkoutSet, LoadPlan, LoadRepsExecution, ReferenceSnapshot, RepsExecution,
-  StoredWorkout, Workout, WorkoutNotes, WorkoutSetV2,
+  StoredWorkout, Workout, WorkoutNotes, WorkoutSetV2, AppWorkout, AppWorkoutSet,
 } from '../types/workout.ts'
 
 // La structure V1 garde sa tolérance historique aux propriétés supplémentaires.
@@ -131,4 +131,12 @@ export function isStoredWorkout(value: unknown): value is StoredWorkout {
 
 export function isStoredWorkouts(value: unknown): value is StoredWorkout[] {
   return Array.isArray(value) && value.every(isStoredWorkout) && new Set(value.map((item) => item.id)).size === value.length
+}
+
+export function isAppWorkoutSet(value: unknown): value is AppWorkoutSet {
+  return isLegacyWorkoutSet(value) || (isWorkoutSetV2(value) && value.kind === 'load-reps')
+}
+
+export function isAppWorkout(value: unknown): value is AppWorkout {
+  return workoutStructure(value, isAppWorkoutSet, true)
 }

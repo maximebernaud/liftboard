@@ -1,6 +1,6 @@
 import { exercises, type Exercise } from '../data/exercises.ts'
 import { getWorkoutProgress, requiresExecutionCorrection } from './workoutExecution.ts'
-import type { Workout } from '../types/workout.ts'
+import type { AppWorkout as Workout } from '../types/workout.ts'
 
 export type HistoryFilters = { exerciseId: Exercise['id'] | ''; date: string }
 

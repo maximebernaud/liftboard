@@ -1,4 +1,4 @@
-import type { Workout } from '../types/workout.ts'
+import type { AppWorkout as Workout } from '../types/workout.ts'
 
 export type SectionId = 'sessions' | 'records' | 'calculator' | 'history'
 export type NavigationState = { section: SectionId; trackingWorkoutId: string | null }

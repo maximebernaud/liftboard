@@ -1225,14 +1225,14 @@ try {
       assert.ok(position.top >= 0 && position.bottom <= position.height - 72, 'Ajouter reste accessible au-dessus de la navigation')
       assert.equal(await evaluate('document.querySelector(".workout-set:last-child input[id$=reps]").value'), '')
       assert.equal(await evaluate('document.querySelector(".workout-set:last-child input[id$=intensity]").value'), '')
-      assert.equal(await evaluate('document.querySelector(".workout-set:last-child select").value'), 'exact')
+      assert.equal(await evaluate('document.querySelector(".workout-set:last-child select[id$=rounding]").value'), 'exact')
       await enter('.workout-set:last-child input[id$=reps]', '3')
       await enter('.workout-set:last-child input[id$=intensity]', '80')
-      await select('.workout-set:last-child select', 'down-2.5')
+      await select('.workout-set:last-child select[id$=rounding]', 'down-2.5')
     }
     const sets = await evaluate(`[...document.querySelectorAll('.workout-set')].map(set => ({
       reps: set.querySelector('input[id$="-reps"]').value, intensity: set.querySelector('input[id$="-intensity"]').value,
-      rounding: set.querySelector('select').value, load: set.querySelector('.workout-load strong').textContent.trim(),
+      rounding: set.querySelector('select[id$=rounding]').value, load: set.querySelector('.workout-load strong').textContent.trim(),
       id: set.querySelector('input').id }))`)
     assert.equal(sets.length, 5)
     assert.equal(new Set(sets.map((set) => set.id)).size, 5)
@@ -1262,7 +1262,7 @@ try {
     assert.equal(await evaluate('document.querySelector(".workout-set:last-child .workout-load strong").textContent.trim()'), '80 kg')
     assert.deepEqual(await storedWorkouts(), [before])
     await enter('.workout-set:first-child input[id$="-intensity"]', '80')
-    await select('.workout-set:first-child select', 'exact')
+    await select('.workout-set:first-child select[id$="-rounding"]', 'exact')
     await click('Notes de séance (facultatif)')
     await enter('textarea', '  Consignes à recopier\nBarre proche\n')
     await click('Après', '.workout-notes-section')
@@ -2518,7 +2518,7 @@ try {
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set label")].filter(label => label.textContent === "Ajustement de la charge").length'), 5)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-set .workout-load")].every(load => /Charge prévue.*82,5 kg.*Charge exacte calculée : 83,3 kg/.test(load.textContent))'), true)
     assert.equal(await evaluate('[...document.querySelectorAll(".workout-editor > .record-hint")].filter(p => p.textContent === "Lorsqu’un Record est disponible, la charge est calculée à partir du 1RM et de l’intensité choisie.").length'), 1)
-    assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select").options].map(option => [option.value, option.textContent])'), [
+    assert.deepEqual(await evaluate('[...document.querySelector(".workout-set select[id$=rounding]").options].map(option => [option.value, option.textContent])'), [
       ['exact', 'Sans arrondi'],
       ['up-1', 'Vers le haut · 1 kg'],
       ['up-2.5', 'Vers le haut · 2,5 kg'],

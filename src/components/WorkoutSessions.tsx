@@ -1,10 +1,11 @@
 import { useEffect,useRef,useState,type ReactNode,type SubmitEvent } from 'react'
-import type { RecordsLoadResult } from '../data/personalRecords'
+import { loadPersonalRecords, type RecordsLoadResult } from '../data/personalRecords'
 import { createWorkout,deleteWorkout,loadWorkouts,sortWorkouts,updateWorkout,type WorkoutsResult } from '../data/workouts'
-import { createWorkoutDraft,duplicateWorkoutDraft,validateWorkoutDraft,workoutToDraft } from '../lib/workoutDraft'
+import { createWorkoutDraft } from '../lib/workoutDraft'
+import { duplicateAppWorkoutDraft,validateAppWorkoutDraft,workoutToAppDraft } from '../lib/workoutEditorDraft'
 import { hasWorkoutExecution } from '../lib/workoutExecution'
 import { formatWorkoutDate } from '../lib/workoutHistory'
-import type { Workout,WorkoutDraft } from '../types/workout'
+import type { AppWorkout as Workout,AppWorkoutDraft as WorkoutDraft } from '../types/workout'
 import SectionIcon from './SectionIcon'
 import WorkoutConfirmation from './WorkoutConfirmation'
 import WorkoutDetail from './WorkoutDetail'
@@ -137,7 +138,7 @@ function WorkoutSessions({ storedRecords,onOpenRecords,screen,onScreenChange,onT
       const source=current.workouts.find((item) => item.id===id)
       if(!source) { setError('Cette séance n’existe plus.'); return }
       setStored(current)
-      setDraft(duplicateWorkoutDraft(source))
+      setDraft(duplicateAppWorkoutDraft(source,loadPersonalRecords().records??[]))
       setOriginal(null)
       setSelected(null)
       setDuplicateSource(source.title)
@@ -163,7 +164,7 @@ function WorkoutSessions({ storedRecords,onOpenRecords,screen,onScreenChange,onT
       setSelected(workout)
       setOriginal(workout)
       setDuplicateSource(null)
-      setDraft(workoutToDraft(workout))
+      setDraft(workoutToAppDraft(workout))
       setHasEdits(false)
       setShowErrors(false)
       changeView('editor')
@@ -185,7 +186,7 @@ function WorkoutSessions({ storedRecords,onOpenRecords,screen,onScreenChange,onT
     event.preventDefault()
     if(!draft) return
     setShowErrors(true)
-    const validation=validateWorkoutDraft(draft,storedRecords.records??[])
+    const validation=validateAppWorkoutDraft(draft,loadPersonalRecords().records)
     if(!validation.valid) {
       setError('Corrigez les champs indiqués avant d’enregistrer la séance.')
       requestAnimationFrame(() => editorForm.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())

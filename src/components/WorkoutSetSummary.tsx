@@ -1,5 +1,6 @@
+import { plannedSetLoad, setPrescription } from '../lib/workoutPresentation'
 import { executionNumberInput, requiresExecutionCorrection } from '../lib/workoutExecution'
-import type { Workout, WorkoutSet, WorkoutSetRounding } from '../types/workout'
+import type { AppWorkout as Workout, AppWorkoutSet as WorkoutSet, WorkoutSetRounding } from '../types/workout'
 
 function roundingLabel(rounding: WorkoutSetRounding): string {
   return rounding.mode === 'exact' ? 'Sans arrondi' :
@@ -11,6 +12,8 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
   number: number
   workoutStatus: Workout['status']
 }) {
+  const load = plannedSetLoad(set)
+  const rounding = set.schemaVersion !== 2 ? set.rounding : set.loading?.method === 'percentage' ? set.loading.rounding : null
   const execution = set.execution
   const invalid = requiresExecutionCorrection(execution)
   const status = invalid ? 'À corriger' : execution?.completed ? 'Effectuée' : workoutStatus === 'planned'
@@ -26,12 +29,12 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
       <div className="workout-set-comparison">
         <div className="workout-comparison-group">
           <p className="workout-label">PRÉVU</p>
-          <p className="workout-comparison-load workout-comparison-planned">{set.load ? <>{executionNumberInput(set.load.selectedKg)} <span>kg</span></> : 'Non renseignée'}{' '}
+          <p className="workout-comparison-load workout-comparison-planned">{load ? <>{executionNumberInput(load.selectedKg)} <span>kg</span></> : 'Non renseignée'}{' '}
             <span className="workout-comparison-reps">× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span>
           </p>
-          <p>{executionNumberInput(set.intensityPct)} % du 1RM</p>
-          {set.rounding.mode !== 'exact' && <p className="record-hint">{roundingLabel(set.rounding)}</p>}
-          {set.load && set.load.exactKg !== set.load.selectedKg && <p className="record-hint">Charge exacte calculée : {executionNumberInput(set.load.exactKg)} kg</p>}
+          <p>{setPrescription(set)}</p>
+          {rounding && rounding.mode !== 'exact' && <p className="record-hint">{roundingLabel(rounding)}</p>}
+          {load && load.exactKg !== load.selectedKg && <p className="record-hint">Charge exacte calculée : {executionNumberInput(load.exactKg)} kg</p>}
         </div>
         <div className="workout-comparison-group">
           <p className="workout-label">SOULEVÉ</p>

@@ -1,5 +1,6 @@
+import type { Exercise } from '../data/exercises'
 import { useEffect, useRef, useState, type SubmitEvent } from 'react'
-import { parseOneRepMax, type Exercise, type PersonalRecord } from '../data/personalRecords'
+import { parseOneRepMax, type PersonalRecord } from '../data/personalRecords'
 import { handleNumericArrow } from '../lib/numericInput'
 import type { RecordEditDraft } from '../lib/recordDiscard'
 

@@ -290,7 +290,7 @@ try {
     const restored = await restorationBrowser.call(() => ({ records: JSON.parse(localStorage.getItem('liftboard.personal-records.v1')), workouts: JSON.parse(localStorage.getItem('liftboard.workouts.v1')) }))
     assert.deepEqual(restored, backup.data)
   })
-  await check('Ancien JSON V1 restauré sans migration ; durée E2-C et import partiel refusés', async () => {
+  await check('Ancien JSON V1 restauré sans migration ; durée décimale et import partiel refusés', async () => {
     const legacy = { id: 'old', title: 'Ancienne séance', date: '2026-11-03', status: 'completed', notes: { before: '  Note\n', during: '', after: '' },
       exercises: [{ id: 'old-block', exerciseId: 'snatch', sets: [{ id: 'old-set', reps: 3, intensityPct: 75, rounding: { mode: 'exact' }, load: { exactKg: 55.5, selectedKg: 55.5 }, execution: { completed: true, reps: 0, loadKg: 0 } }] }] }
     const v1 = { format: 'liftboard.backup', version: 1, exportedAt: '2026-11-03T12:00:00.000Z', data: { records: [{ exerciseId: 'snatch', oneRepMaxKg: 100 }], workouts: [legacy] } }
@@ -301,7 +301,7 @@ try {
     await restorationBrowser.reload()
     assert.deepEqual(await restorationBrowser.call(() => JSON.parse(localStorage.getItem('liftboard.workouts.v1'))), [legacy])
     const bad = structuredClone(backup)
-    bad.data.workouts[0].exercises[0].sets[0] = { schemaVersion: 2, id: 'duration', kind: 'duration', durationSeconds: 45 }
+    bad.data.workouts[0].exercises[0].sets[0] = { schemaVersion: 2, id: 'duration', kind: 'duration', durationSeconds: 1.5 }
     const badPath = join(artifacts, 'duree-interdite-v2.json')
     await writeFile(badPath, JSON.stringify(bad))
     await importFile(restorationBrowser, badPath)

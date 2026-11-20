@@ -20,8 +20,10 @@ export function isWorkoutNotes(value: unknown): value is WorkoutNotes {
 }
 
 export function isLegacyWorkoutSet(value: unknown): value is LegacyWorkoutSet {
-  // Seule nouvelle restriction V1 : aucun objet versionné ne doit contourner son validateur.
-  if (!object(value) || 'schemaVersion' in value || !identifier(value.id) || typeof value.reps !== 'number' ||
+  // Les discriminants/champs E2 ne peuvent pas contourner leur contrat en omettant
+  // schemaVersion. Les métadonnées historiques étrangères restent tolérées.
+  if (!object(value) || 'schemaVersion' in value || 'kind' in value || 'loading' in value || 'durationSeconds' in value ||
+    !identifier(value.id) || typeof value.reps !== 'number' ||
     !Number.isSafeInteger(value.reps) || value.reps <= 0 || typeof value.intensityPct !== 'number' ||
     !Number.isFinite(value.intensityPct) || value.intensityPct < 1 || value.intensityPct > 100 ||
     !isWorkoutSetRounding(value.rounding) ||
@@ -95,7 +97,7 @@ export function isStoredWorkoutSet(value: unknown): value is LegacyWorkoutSet | 
   return object(value) && ('schemaVersion' in value ? isWorkoutSetV2(value) : isLegacyWorkoutSet(value))
 }
 
-function workoutStructure(value: unknown, validSet: (set: unknown) => boolean, homogeneous: boolean): boolean {
+function workoutStructure(value: unknown, validSet: (set: unknown) => boolean): boolean {
   if (!object(value) || !identifier(value.id) || typeof value.title !== 'string' || !value.title.trim() ||
     typeof value.date !== 'string' || !isValidWorkoutDate(value.date) ||
     (value.status !== 'planned' && value.status !== 'completed') || !isWorkoutNotes(value.notes) ||
@@ -109,24 +111,20 @@ function workoutStructure(value: unknown, validSet: (set: unknown) => boolean, h
   return value.exercises.every((block: unknown) => {
     if (!object(block) || !uniqueId(block.id) || !isExerciseId(block.exerciseId) ||
       !Array.isArray(block.sets) || !block.sets.length) return false
-    let kind: unknown
     return block.sets.every((set: unknown) => {
       if (!object(set) || !uniqueId(set.id) || !validSet(set)) return false
-      const currentKind = 'schemaVersion' in set ? set.kind : 'load-reps'
-      if (homogeneous && kind !== undefined && currentKind !== kind) return false
-      kind = currentKind
       return true
     })
   })
 }
 
 export function isLegacyWorkout(value: unknown): value is Workout {
-  return workoutStructure(value, isLegacyWorkoutSet, false)
+  return workoutStructure(value, isLegacyWorkoutSet)
 }
 
-/** Reconnaissance future pure, non branchée aux lecteurs, imports ou mutations publics en E2-A. */
+/** Les trois suivis peuvent coexister dans un même bloc. */
 export function isStoredWorkout(value: unknown): value is StoredWorkout {
-  return workoutStructure(value, isStoredWorkoutSet, true)
+  return workoutStructure(value, isStoredWorkoutSet)
 }
 
 export function isStoredWorkouts(value: unknown): value is StoredWorkout[] {
@@ -134,9 +132,9 @@ export function isStoredWorkouts(value: unknown): value is StoredWorkout[] {
 }
 
 export function isAppWorkoutSet(value: unknown): value is AppWorkoutSet {
-  return isLegacyWorkoutSet(value) || (isWorkoutSetV2(value) && value.kind === 'load-reps')
+  return isStoredWorkoutSet(value)
 }
 
 export function isAppWorkout(value: unknown): value is AppWorkout {
-  return workoutStructure(value, isAppWorkoutSet, true)
+  return workoutStructure(value, isAppWorkoutSet)
 }

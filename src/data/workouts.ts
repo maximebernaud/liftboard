@@ -1,8 +1,9 @@
-import { isAppWorkout, isLoadRepsExecution } from '../lib/workoutSchema.ts'
-import { hasWorkoutExecution, isWorkoutSetExecution, isWritableExecution, sameExecution } from '../lib/workoutExecution.ts'
+import { isAppWorkout } from '../lib/workoutSchema.ts'
+import { hasWorkoutExecution } from '../lib/workoutExecution.ts'
+import { withSetExecution } from '../lib/workoutSetExecution.ts'
 import { storedWorkoutProgramSignature as workoutProgramSignature, sameStoredSetExecution } from '../lib/workoutComparison.ts'
 import { workoutCompletionError } from '../lib/workoutHistory.ts'
-import type { AppWorkout as Workout, WorkoutNotes, WorkoutNoteCategory, WorkoutSetExecution } from '../types/workout.ts'
+import type { AppWorkout as Workout, AppSetExecution, WorkoutNotes, WorkoutNoteCategory } from '../types/workout.ts'
 
 export const workoutsStorageKey = 'liftboard.workouts.v1'
 export type WorkoutStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -60,7 +61,7 @@ function writeWorkouts(workouts: Workout[], storage?: WorkoutStorage): WorkoutsR
 
 export function createWorkout(workout: Workout, storage?: WorkoutStorage): WorkoutsResult {
   if (!isWorkout(workout) || workout.status !== 'planned' || workout.exercises.some((block) =>
-    block.sets.some((set) => set.execution && !isWritableExecution(set.execution)))) return fail('La séance est invalide et n’a pas été enregistrée.')
+    block.sets.some((set) => set.execution && !withSetExecution(set, set.execution, true)))) return fail('La séance est invalide et n’a pas été enregistrée.')
   const current = loadWorkouts(storage)
   if (!current.ok) return current
   if (current.workouts.some((item) => item.id === workout.id)) return fail('Cette séance existe déjà. Aucun doublon créé.')
@@ -124,10 +125,10 @@ export function updateWorkoutSetExecution(
   original: Workout,
   blockId: string,
   setId: string,
-  execution: WorkoutSetExecution,
+  execution: AppSetExecution,
   storage?: WorkoutStorage,
 ): WorkoutsResult {
-  if (!isWorkout(original) || !identifier(blockId) || !identifier(setId) || !isWorkoutSetExecution(execution)) {
+  if (!isWorkout(original) || !identifier(blockId) || !identifier(setId)) {
     return fail('Résultat invalide. Aucune modification enregistrée.')
   }
   const current = loadWorkouts(storage)
@@ -138,16 +139,15 @@ export function updateWorkoutSetExecution(
   const previousSet = original.exercises.find((block) => block.id === blockId)?.sets.find((set) => set.id === setId)
   const latestSet = latest.exercises.find((block) => block.id === blockId)?.sets.find((set) => set.id === setId)
   if (!previousSet || !latestSet) return fail('Cette série n’existe plus. Vos saisies restent en mémoire.')
-  if (!sameStoredSetExecution(latestSet, previousSet) && !sameExecution(latestSet.execution, execution)) {
+  const candidate = withSetExecution(latestSet, execution)
+  if (!candidate) return fail('Résultat invalide : renseignez uniquement les valeurs du type de suivi, strictement positives et dans les limites numériques sûres. Aucune modification enregistrée.')
+  if (!sameStoredSetExecution(latestSet, previousSet) && !sameStoredSetExecution(latestSet, candidate)) {
     return fail('Les résultats de cette série ont changé ailleurs. Vos saisies restent en mémoire. Revenez à la séance puis rouvrez le suivi pour consulter la version enregistrée avant de corriger.')
-  }
-  if (!isWritableExecution(execution, latestSet.execution) || (latestSet.schemaVersion === 2 && !isLoadRepsExecution(execution))) {
-    return fail('Résultat invalide : répétitions entières et charge strictement positives, dans les limites numériques sûres. Aucune modification enregistrée.')
   }
   const updated: Workout = {
     ...latest,
     exercises: latest.exercises.map((block) => block.id !== blockId ? block : ({
-      ...block, sets: block.sets.map((set) => set.id !== setId ? set : { ...set, execution: { ...execution } }),
+      ...block, sets: block.sets.map((set) => set.id !== setId ? set : candidate),
     })),
   }
   return writeWorkouts(current.workouts.map((item) => item.id === latest.id ? updated : item), storage)

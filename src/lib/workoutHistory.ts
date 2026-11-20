@@ -1,5 +1,6 @@
 import { exercises, type Exercise } from '../data/exercises.ts'
-import { getWorkoutProgress, requiresExecutionCorrection } from './workoutExecution.ts'
+import { getWorkoutProgress } from './workoutExecution.ts'
+import { requiresSetExecutionCorrection } from './workoutSetExecution.ts'
 import type { AppWorkout as Workout } from '../types/workout.ts'
 
 export type HistoryFilters = { exerciseId: Exercise['id'] | ''; date: string }
@@ -34,7 +35,7 @@ export function workoutCompletionMessage(workout: Workout): string {
 export function workoutCompletionError(workout: Workout): string | null {
   for (const [blockIndex, block] of workout.exercises.entries()) {
     for (const [setIndex, set] of block.sets.entries()) {
-      if (set.execution?.completed && requiresExecutionCorrection(set.execution)) {
+      if (set.execution?.completed && requiresSetExecutionCorrection(set)) {
         const name = exercises.find((item) => item.id === block.exerciseId)?.name
         return `Exercice ${blockIndex + 1} (${name}), série ${setIndex + 1} : ancien résultat invalide. Corrigez les répétitions et la charge dans le suivi avant de terminer la séance.`
       }

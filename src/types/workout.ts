@@ -76,7 +76,7 @@ export type WorkoutDraftValidation =
   | { valid: true; workout: Workout; errors: WorkoutDraftErrors }
   | { valid: false; workout: null; errors: WorkoutDraftErrors }
 
-// Contrats E2 préparés uniquement : les composants et le stockage public restent en V1.
+// Contrats E2 : discriminants stricts, sans migration des séries historiques.
 export type LegacyWorkoutSet = WorkoutSet & { schemaVersion?: never }
 export type TrackingKind = 'load-reps' | 'reps' | 'duration'
 
@@ -130,9 +130,9 @@ export type StoredWorkoutExercise = Omit<WorkoutExercise, 'sets'> & { sets: Stor
 // Les données entièrement historiques pourront garder l'enveloppe V1.
 export type StoredWorkout = Omit<Workout, 'exercises'> & { exercises: StoredWorkoutExercise[] }
 
-// Contrat public E2-B : les autres suivis V2 restent réservés à E2-C.
 export type LoadedWorkoutSetV2 = Extract<WorkoutSetV2, { kind: 'load-reps' }>
-export type AppWorkoutSet = LegacyWorkoutSet | LoadedWorkoutSetV2
+export type AppWorkoutSet = StoredWorkoutSet
+export type AppSetExecution = NonNullable<AppWorkoutSet['execution']>
 export type AppWorkoutExercise = Omit<WorkoutExercise, 'sets'> & { sets: AppWorkoutSet[] }
 export type AppWorkout = Omit<Workout, 'exercises'> & { exercises: AppWorkoutExercise[] }
 
@@ -144,12 +144,19 @@ export type E2LoadDraft = {
   reference: ReferenceSnapshot | null
   savedPlan?: Extract<LoadPlan, { method: 'percentage' }>
 }
-export type AppSetDraft = WorkoutSetDraft & { e2?: E2LoadDraft }
+// Les branches inactives restent uniquement dans le formulaire React.
+// repsInput et e2 conservent le brouillon chargé ; aucune conversion d'unités.
+export type AppSetDraft = WorkoutSetDraft & {
+  e2?: E2LoadDraft
+  kind?: TrackingKind
+  repsOnlyInput?: string
+  durationInput?: string
+}
 export type AppExerciseDraft = Omit<WorkoutExerciseDraft, 'sets'> & { sets: AppSetDraft[] }
 export type AppWorkoutDraft = Omit<WorkoutDraft, 'exercises'> & { exercises: AppExerciseDraft[] }
 export type AppDraftErrors = Omit<WorkoutDraftErrors, 'blocks'> & {
   blocks: Record<string, { exercise?: string; sets?: string; fields: Record<string, {
-    reps?: string; intensity?: string; rounding?: string; reference?: string; load?: string
+    reps?: string; duration?: string; intensity?: string; rounding?: string; reference?: string; load?: string
   }> }>
 }
 export type AppDraftValidation =

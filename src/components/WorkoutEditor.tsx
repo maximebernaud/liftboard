@@ -88,17 +88,20 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
   const record=storedRecords.records?.find((item) => item.exerciseId===block.exerciseId)
   const exerciseName=exercises.find((item) => item.id===block.exerciseId)?.name
   const recordSupported=isRecordExerciseId(block.exerciseId)
-  const hasLegacySets=block.sets.some((set) => !set.e2||set.e2.method==='legacy')
+  const hasLoadedSets=block.sets.some((set) => !set.kind||set.kind==='load-reps')
+  const hasLegacySets=block.sets.some((set) => (!set.kind||set.kind==='load-reps')&&(!set.e2||set.e2.method==='legacy'))
   const blockId=`workout-block-${block.id}`
 
   useEffect(() => {
     if(!revealAddedSet.current) return
     // Révéler le numéro et les champs ajoutés sans déplacer le focus vers un input.
+    const title=document.getElementById(`workout-set-${revealAddedSet.current}-title`)
+    title?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
+    // Quand l'éditeur dépasse l'écran, le contrôle d'ajout doit rester dégagé
+    // au-dessus de la navigation après la révélation du titre.
     if(block.sets.at(-1)?.id===revealAddedSet.current) {
       addSetButton.current?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
     }
-    const title=document.getElementById(`workout-set-${revealAddedSet.current}-title`)
-    title?.scrollIntoView({ block: 'nearest',behavior: 'instant' })
     revealAddedSet.current=null
   },[block.sets])
 
@@ -132,7 +135,7 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
           {errors.exercise&&<p className="record-error" role="alert">{errors.exercise}</p>}
         </div>
 
-        <div className="workout-record-context">
+        {hasLoadedSets&&<div className="workout-record-context">
           {hasLegacySets? <>
           {!recordSupported? (
             <p>Aucun Record disponible pour ce mouvement. La charge prévue reste non calculée ; la séance peut être enregistrée.</p>
@@ -150,15 +153,17 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
             </button>
           )}
           </>:<p>Chaque série conserve sa méthode de charge et sa référence choisie. Les charges enregistrées restent figées.</p>}
-        </div>
+        </div>}
       </div>
 
       <div className="workout-set-list">
         {block.sets.map((set,index) => {
           const setId=`workout-set-${set.id}`
+          const kind=set.kind??'load-reps'
+          const loaded=kind==='load-reps'
           const load=getAppSetLoad(set,storedRecords.records,block.exerciseId)
           const method=set.e2?.method??'legacy'
-          const canCalculateSavedLoad=method==='legacy'&&set.savedLoad===null&&
+          const canCalculateSavedLoad=loaded&&method==='legacy'&&set.savedLoad===null&&
             getAppSetLoad({ ...set,savedLoad: undefined },storedRecords.records,block.exerciseId).status==='ready'
           const prescription=method==='legacy'? `${set.intensityInput||'—'} % du 1RM`
             :method==='manual'? 'Charge libre'
@@ -186,6 +191,26 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
               <div className="workout-set-layout">
                 {/* Les champs restent montés : valeurs, erreurs et état de visite sont conservés. */}
                 <div id={`${setId}-editor`} className="workout-set-editor" hidden={!expanded}>
+                  <div className="workout-field workout-tracking-kind">
+                    <label htmlFor={`${setId}-kind`}>Type de suivi</label>
+                    <select id={`${setId}-kind`} value={kind} onChange={(event) => {
+                      const kind=event.target.value
+                      if(kind==='load-reps'||kind==='reps'||kind==='duration') {
+                        onChange((draft) => updateDraftSet(draft,block.id,set.id,{ kind }))
+                      }
+                    }}>
+                      <option value="load-reps">Charge + répétitions</option>
+                      <option value="reps">Répétitions seules</option>
+                      <option value="duration">Durée</option>
+                    </select>
+                  </div>
+                  {kind==='reps'&&<DraftField id={`${setId}-reps-only`} label="Répétitions prévues" inputMode="numeric"
+                    value={set.repsOnlyInput??''} error={fieldErrors?.reps} showErrors={showErrors}
+                    onChange={(repsOnlyInput) => onChange((draft) => updateDraftSet(draft,block.id,set.id,{ repsOnlyInput }))} />}
+                  {kind==='duration'&&<DraftField id={`${setId}-duration`} label="Durée prévue (secondes)" inputMode="numeric"
+                    value={set.durationInput??''} error={fieldErrors?.duration} showErrors={showErrors}
+                    onChange={(durationInput) => onChange((draft) => updateDraftSet(draft,block.id,set.id,{ durationInput }))} />}
+                  {loaded&&<>
                   <div className="workout-field workout-load-method">
                     <label htmlFor={`${setId}-method`}>Méthode de charge</label>
                     <select id={`${setId}-method`} value={set.e2?.method??'legacy'} onChange={(event) => {
@@ -246,13 +271,15 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
                     storedRecords={storedRecords} onOpenRecords={onOpenRecords}
                     shortcut={storedRecords.records?.find((record) => record.exerciseId===block.sets.slice(0,index).findLast((item) => item.e2?.reference)?.e2?.reference?.exerciseId)}
                     onChange={(e2) => onChange((draft) => updateDraftSet(draft,block.id,set.id,{ e2 }))} />}
+                  </>}
                 </div>
                 <div className="workout-set-result">
                   <div className="workout-load" role="status" aria-live="polite" aria-atomic="true">
                     <span className="workout-label">
-                      Charge prévue
+                      {loaded?'Charge prévue':kind==='reps'?'Répétitions prévues':'Durée prévue'}
                     </span>
-                    {load.status==='ready'? (
+                    {!loaded? <strong>{(kind==='reps'?set.repsOnlyInput:set.durationInput)||'—'} <span>{kind==='reps'?'répétitions':'secondes'}</span></strong>
+                    :load.status==='ready'? (
                       <>
                         <strong>{load.selectedKg.toString().replace('.',',')} <span>kg</span></strong>
                         {load.selectedKg!==load.exactKg&&(
@@ -262,7 +289,7 @@ function ExerciseBlock({ block,number,errors,storedRecords,onChange,onRemove,onO
                     ):(
                       <><strong>—</strong><span className="record-hint">{method!=='legacy'? (method==='none'?'Sans charge prévue':'Saisie à compléter ou référence à vérifier'):loadMessage}</span></>
                     )}
-                    <p className="workout-set-prescription" hidden={expanded}>{set.repsInput||'—'} rép. · {prescription}</p>
+                    {loaded&&<p className="workout-set-prescription" hidden={expanded}>{set.repsInput||'—'} rép. · {prescription}</p>}
                   </div>
                   <div className="workout-set-controls">
                     {canCalculateSavedLoad&&(
@@ -425,7 +452,7 @@ function WorkoutEditor({ draft,storedRecords,onChange,onOpenRecords,showErrors=f
               initiallyExpanded={block.id===addedBlockId}
               showErrors={showErrors}
               onRemove={() => {
-                if(block.sets.some((set) => set.e2)||hasWorkoutExerciseData(block)) setPendingRemoval(block)
+                if(block.sets.some((set) => set.e2||set.kind)||hasWorkoutExerciseData(block)) setPendingRemoval(block)
                 else removeExercise(block.id)
               }}
             />

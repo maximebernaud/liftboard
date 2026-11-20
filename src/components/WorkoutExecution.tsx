@@ -4,12 +4,17 @@ import { exercises } from '../data/exercises'
 import { completeWorkout, updateWorkoutSetExecution, type WorkoutsResult } from '../data/workouts'
 import { workoutCompletionError, workoutCompletionMessage } from '../lib/workoutHistory'
 import {
-  confirmSetExecution, executionInputs, executionNumberInput, getWorkoutProgress, hasPendingExecutionInputs,
-  parseExecutionLoad, parseExecutionReps, partialSetExecution, requiresExecutionCorrection, type ExecutionInputs,
+  executionNumberInput, getWorkoutProgress,
 } from '../lib/workoutExecution'
+import {
+  appExecutionInputs, confirmAppSetExecution, hasPendingAppExecutionInputs, parseSetExecutionField,
+  partialAppSetExecution, plannedExecutionValue, requiresSetExecutionCorrection, setExecutionFields,
+  type SetExecutionInputs,
+} from '../lib/workoutSetExecution'
 import { handleNumericArrow } from '../lib/numericInput'
-import type { AppWorkout as Workout, AppWorkoutSet as WorkoutSet, WorkoutSetExecution } from '../types/workout'
+import type { AppWorkout as Workout, AppWorkoutSet as WorkoutSet, AppSetExecution } from '../types/workout'
 import WorkoutConfirmation from './WorkoutConfirmation'
+import WorkoutSetValue from './WorkoutSetValue'
 
 type SavedResult = Extract<WorkoutsResult, { ok: true }>
 
@@ -21,7 +26,7 @@ function focusExecutionControl(control: HTMLElement | null) {
 function nextUnstartedSetId(workout: Workout, afterId?: string): string | null {
   const sets = workout.exercises.flatMap((block) => block.sets)
   // Les résultats partiels ou anciens à corriger restent prioritaires et ouverts.
-  if (sets.some((set) => set.execution && (!set.execution.completed || requiresExecutionCorrection(set.execution)))) return null
+  if (sets.some((set) => set.execution && (!set.execution.completed || requiresSetExecutionCorrection(set)))) return null
   const start = afterId === undefined ? 0 : sets.findIndex((set) => set.id === afterId) + 1
   return sets.slice(start).find((set) => set.execution === undefined)?.id ?? null
 }
@@ -38,24 +43,26 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
 }) {
   // La référence de conflit ne bouge qu'après notre propre écriture réussie.
   const [savedWorkout, setSavedWorkout] = useState(workout)
-  const [inputs, setInputs] = useState(() => executionInputs(set.execution))
-  const [attempt, setAttempt] = useState<WorkoutSetExecution | null>(null)
+  const [inputs, setInputs] = useState(() => appExecutionInputs(set))
+  const [attempt, setAttempt] = useState<AppSetExecution | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showRequired, setShowRequired] = useState(false)
   const [editing, setEditing] = useState(false)
   const form = useRef<HTMLFormElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const editButton = useRef<HTMLButtonElement>(null)
-  const saved = savedWorkout.exercises.find((block) => block.id === blockId)!.sets.find((item) => item.id === set.id)!.execution
+  const savedSet = savedWorkout.exercises.find((block) => block.id === blockId)!.sets.find((item) => item.id === set.id)!
+  const saved = savedSet.execution
+  const loaded = set.schemaVersion !== 2 || set.kind === 'load-reps'
+  const fields = setExecutionFields(set)
   const plannedLoad = plannedSetLoad(set)
-  const parsed = { reps: parseExecutionReps(inputs.reps ?? ''), loadKg: parseExecutionLoad(inputs.loadKg ?? '') }
-  const invalid = { reps: Boolean(inputs.reps?.trim()) && parsed.reps === null, loadKg: Boolean(inputs.loadKg?.trim()) && parsed.loadKg === null }
-  const dirty = hasPendingExecutionInputs(inputs, saved)
+  const invalid = (field: keyof SetExecutionInputs) => Boolean(inputs[field]?.trim()) && parseSetExecutionField(field, inputs[field] ?? '') === null
+  const dirty = hasPendingAppExecutionInputs(savedSet, inputs)
   const pending = dirty || attempt !== null
-  const needsCorrection = requiresExecutionCorrection(saved)
-  const confirmation = confirmSetExecution(set, inputs)
-  const untouched = saved === undefined && set.execution === undefined && inputs.reps === null && inputs.loadKg === null
-  const needsAttention = pending || Boolean(error) || needsCorrection || invalid.reps || invalid.loadKg ||
+  const needsCorrection = requiresSetExecutionCorrection(savedSet)
+  const confirmation = confirmAppSetExecution(set, inputs)
+  const untouched = saved === undefined && set.execution === undefined && fields.every((field) => inputs[field] === null)
+  const needsAttention = pending || Boolean(error) || needsCorrection || fields.some(invalid) ||
     (showRequired && Object.keys(confirmation.errors).length > 0)
   const canCompact = !needsAttention && (Boolean(saved?.completed) || untouched)
   const compact = canCompact && (saved?.completed ? !editing : !selected)
@@ -67,7 +74,7 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
 
   useEffect(() => { onPendingChange(set.id, pending) }, [onPendingChange, pending, set.id])
 
-  function persist(execution: WorkoutSetExecution, fillInputs = false) {
+  function persist(execution: AppSetExecution, fillInputs = false) {
     const result = updateWorkoutSetExecution(savedWorkout, blockId, set.id, execution)
     if (!result.ok) {
       setAttempt(execution)
@@ -78,7 +85,8 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
     setAttempt(null)
     setError(null)
     if (fillInputs) {
-      setInputs(executionInputs(execution))
+      const updatedSet = result.workouts.find((item) => item.id === workout.id)!.exercises.find((block) => block.id === blockId)!.sets.find((item) => item.id === set.id)!
+      setInputs(appExecutionInputs(updatedSet))
       setShowRequired(false)
       if (execution.completed) {
         setEditing(false)
@@ -91,17 +99,16 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
     onSaved(result, execution.completed && !saved?.completed)
   }
 
-  function change(field: keyof ExecutionInputs, value: string) {
+  function change(field: keyof SetExecutionInputs, value: string) {
     const next = { ...inputs, [field]: value }
     setInputs(next)
     setAttempt(null)
     setError(null)
     // Une correction d'une série réalisée demande une confirmation explicite.
     if (saved?.completed) return
-    const parse = field === 'reps' ? parseExecutionReps : parseExecutionLoad
-    if (value.trim() && parse(value) === null) return
+    if (value.trim() && parseSetExecutionField(field, value) === null) return
     // Un champ invalide reste visible ; seul son dernier résultat valide est conservé.
-    persist(partialSetExecution(next, saved))
+    persist(partialAppSetExecution(savedSet, next))
   }
 
   const openButton = <button ref={editButton} className="record-button workout-execution-toggle" type="button" hidden={!compact && !plannedReady}
@@ -139,9 +146,8 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
       {(compactUnstarted || plannedReady) && <div className="workout-execution-compact-summary" role="group" aria-label="Programmation de la série">
         {plannedReady && <p className="workout-label">Prévu</p>}
         <p id={`${id}-planned-result`} className="workout-execution-result">
-          <strong>{plannedLoad ? <>{executionNumberInput(plannedLoad.selectedKg)} <span>kg</span></> : '—'}</strong>{' '}
-          <span>× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span>{' '}
-          <span className="workout-execution-intensity">{setPrescription(set)}</span>
+          <WorkoutSetValue set={set} />{' '}
+          {loaded && <span className="workout-execution-intensity">{setPrescription(set)}</span>}
         </p>
         {!confirmation.execution && <p className="record-hint">
           {plannedLoad === null ? 'Charge prévue non renseignée.' : 'Charge prévue à vérifier.'} Ajustez la charge réalisée.
@@ -154,37 +160,35 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
       </div>}
       {compact && saved?.completed && <div className="workout-execution-compact-summary">
         <p id={`${id}-result`} className="workout-execution-result">
-          <strong>{executionNumberInput(saved.loadKg)} <span>kg</span></strong>{' '}
-          <span>× {executionNumberInput(saved.reps)} répétition{saved.reps > 1 ? 's' : ''}</span>
+          <WorkoutSetValue set={set} execution={saved} />
         </p>
         <p id={`${id}-planned-summary`} className="workout-execution-compact-planned">
-          Prévu : {plannedLoad ? `${executionNumberInput(plannedLoad.selectedKg)} kg` : 'charge non renseignée'}
-          {' × '}{set.reps} répétition{set.reps > 1 ? 's' : ''} · {setPrescription(set)}
+          Prévu : <WorkoutSetValue set={set} missingLoad="charge non renseignée" />{loaded && ` · ${setPrescription(set)}`}
         </p>
       </div>}
       {/* Le formulaire reste monté : replier ne réinitialise ni saisie ni référence de conflit. */}
       <div id={`${id}-editor`} className="workout-execution-editor" hidden={compact || plannedReady}>
         <div className="workout-execution-planned">
           <p className="workout-label">Prévu</p>
-          <p><strong>{plannedLoad ? <>{executionNumberInput(plannedLoad.selectedKg)} <span>kg</span></> : '—'}</strong>{' '}<span>× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span><span aria-hidden="true"> · </span>{setPrescription(set)}</p>
+          <p><WorkoutSetValue set={set} />{loaded && <><span aria-hidden="true"> · </span>{setPrescription(set)}</>}</p>
         </div>
         <fieldset className="workout-execution-fields">
           <legend>Réalisé</legend>
           <div className="workout-set-fields">
-            {(['reps', 'loadKg'] as const).map((field) => {
+            {fields.map((field) => {
               const fieldId = `${id}-${field}`
-              const fieldError = invalid[field] || showRequired ? confirmation.errors[field] : undefined
+              const fieldError = invalid(field) || showRequired ? confirmation.errors[field] : undefined
               return (
                 <div className="workout-field" key={field}>
-                  <label htmlFor={fieldId}>{field === 'reps' ? 'Répétitions effectuées' : 'Charge réellement soulevée (kg)'}</label>
-                  <input id={fieldId} type="text" inputMode={field === 'reps' ? 'numeric' : 'decimal'}
+                  <label htmlFor={fieldId}>{field === 'reps' ? 'Répétitions effectuées' : field === 'durationSeconds' ? 'Durée effectuée (secondes)' : 'Charge réellement soulevée (kg)'}</label>
+                  <input id={fieldId} type="text" inputMode={field === 'loadKg' ? 'decimal' : 'numeric'}
                     autoComplete="off" spellCheck={false} value={inputs[field] ?? ''}
-                    placeholder={inputs[field] === null ? executionNumberInput(field === 'reps' ? set.reps : plannedLoad?.selectedKg) : undefined}
+                    placeholder={inputs[field] === null ? executionNumberInput(plannedExecutionValue(set, field)) : undefined}
                     aria-invalid={Boolean(fieldError)} aria-describedby={`${id}-hint${fieldError ? ` ${fieldId}-error` : ''}`}
                     onChange={(event) => change(field, event.target.value)}
                     onKeyDown={(event) => handleNumericArrow(event.nativeEvent,
-                      inputs[field] ?? executionNumberInput(field === 'reps' ? set.reps : plannedLoad?.selectedKg),
-                      field === 'reps' ? 'execution-reps' : 'execution-load', (value) => change(field, value))} />
+                      inputs[field] ?? executionNumberInput(plannedExecutionValue(set, field)),
+                      field === 'loadKg' ? 'execution-load' : 'execution-reps', (value) => change(field, value))} />
                   {fieldError && <p id={`${fieldId}-error`} className="record-error">{fieldError}</p>}
                 </div>
               )
@@ -192,8 +196,8 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
           </div>
         </fieldset>
         {needsCorrection && <p className="record-error">Ancien résultat à corriger : répétitions et charge doivent être strictement positives et dans les limites numériques sûres. Les valeurs enregistrées sont conservées.</p>}
-        <p id={`${id}-hint`} className="record-hint">Les champs laissés intacts reprennent le prévu à la confirmation. {plannedLoad === null && 'Charge absente : renseignez les kg.'}</p>
-        {saved?.completed && <p className="record-hint">Enregistré : {executionNumberInput(saved.loadKg)} kg × {executionNumberInput(saved.reps)} répétition{saved.reps > 1 ? 's' : ''}.</p>}
+        <p id={`${id}-hint`} className="record-hint">Les champs laissés intacts reprennent le prévu à la confirmation. {loaded && plannedLoad === null && 'Charge absente : renseignez les kg.'}</p>
+        {saved?.completed && <p className="record-hint">Enregistré : <WorkoutSetValue set={set} execution={saved} />.</p>}
         <div className="workout-form-actions">
           {(!saved?.completed || pending || needsCorrection) && <button className="record-button record-button-primary" type="submit">
             {saved?.completed ? 'Enregistrer la correction' : 'Série réalisée'}
@@ -201,7 +205,7 @@ function ExecutionSet({ workout, blockId, set, number, selected, onSelect, onSav
           {saved?.completed && <button className="record-button" type="button" disabled={pending}
             onClick={() => persist({ ...saved, completed: false })}>Annuler l’état réalisé</button>}
           {saved?.completed && pending && <button className="record-button" type="button" onClick={() => {
-            setInputs(executionInputs(saved)); setAttempt(null); setError(null); setShowRequired(false)
+            setInputs(appExecutionInputs(savedSet)); setAttempt(null); setError(null); setShowRequired(false)
             requestAnimationFrame(() => focusExecutionControl(form.current?.querySelector<HTMLInputElement>('input') ?? null))
           }}>Rétablir les valeurs enregistrées</button>}
           <button className="record-button workout-execution-close" type="button" disabled={!canCompact}

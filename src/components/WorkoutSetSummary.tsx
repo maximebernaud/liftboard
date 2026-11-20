@@ -1,5 +1,7 @@
 import { plannedSetLoad, setPrescription } from '../lib/workoutPresentation'
-import { executionNumberInput, requiresExecutionCorrection } from '../lib/workoutExecution'
+import { executionNumberInput } from '../lib/workoutExecution'
+import { requiresSetExecutionCorrection } from '../lib/workoutSetExecution'
+import WorkoutSetValue from './WorkoutSetValue'
 import type { AppWorkout as Workout, AppWorkoutSet as WorkoutSet, WorkoutSetRounding } from '../types/workout'
 
 function roundingLabel(rounding: WorkoutSetRounding): string {
@@ -13,9 +15,10 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
   workoutStatus: Workout['status']
 }) {
   const load = plannedSetLoad(set)
-  const rounding = set.schemaVersion !== 2 ? set.rounding : set.loading?.method === 'percentage' ? set.loading.rounding : null
+  const loaded = set.schemaVersion !== 2 || set.kind === 'load-reps'
+  const rounding = set.schemaVersion !== 2 ? set.rounding : set.kind === 'load-reps' && set.loading?.method === 'percentage' ? set.loading.rounding : null
   const execution = set.execution
-  const invalid = requiresExecutionCorrection(execution)
+  const invalid = requiresSetExecutionCorrection(set)
   const status = invalid ? 'À corriger' : execution?.completed ? 'Effectuée' : workoutStatus === 'planned'
     ? 'À réaliser' : execution ? 'Non confirmée' : 'Non effectuée'
   const titleId = `summary-${workoutStatus}-${set.id}`
@@ -29,19 +32,15 @@ export default function WorkoutSetSummary({ set, number, workoutStatus }: {
       <div className="workout-set-comparison">
         <div className="workout-comparison-group">
           <p className="workout-label">PRÉVU</p>
-          <p className="workout-comparison-load workout-comparison-planned">{load ? <>{executionNumberInput(load.selectedKg)} <span>kg</span></> : 'Non renseignée'}{' '}
-            <span className="workout-comparison-reps">× {set.reps} répétition{set.reps > 1 ? 's' : ''}</span>
-          </p>
-          <p>{setPrescription(set)}</p>
+          <p className="workout-comparison-load workout-comparison-planned"><WorkoutSetValue set={set} missingLoad="Non renseignée" /></p>
+          {loaded && <p>{setPrescription(set)}</p>}
           {rounding && rounding.mode !== 'exact' && <p className="record-hint">{roundingLabel(rounding)}</p>}
           {load && load.exactKg !== load.selectedKg && <p className="record-hint">Charge exacte calculée : {executionNumberInput(load.exactKg)} kg</p>}
         </div>
         <div className="workout-comparison-group">
-          <p className="workout-label">SOULEVÉ</p>
+          <p className="workout-label">{loaded ? 'SOULEVÉ' : 'RÉALISÉ'}</p>
           {execution ? <>
-            <p className="workout-comparison-load">{execution.loadKg === null ? 'Non renseignée' : <>{executionNumberInput(execution.loadKg)} <span>kg</span></>}{' '}
-              <span className="workout-comparison-reps">{execution.reps === null ? 'Répétitions non renseignées' : `× ${executionNumberInput(execution.reps)} répétition${execution.reps > 1 ? 's' : ''}`}</span>
-            </p>
+            <p className="workout-comparison-load"><WorkoutSetValue set={set} execution={execution} missingLoad="Non renseignée" /></p>
             {!execution.completed && <p className="record-hint">Saisie conservée, non confirmée comme effectuée.</p>}
           </> : <p>{workoutStatus === 'planned' ? 'Aucun résultat enregistré' : 'Non effectuée'}</p>}
         </div>

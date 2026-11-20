@@ -15,10 +15,11 @@ export default function WorkoutDetail({ workout, onEdit, onNotes, onDelete, onTr
 }) {
   const started = hasWorkoutExecution(workout)
   const completed = workout.status === 'completed'
+  const loaded = workout.exercises.some((block) => block.sets.some((set) => set.schemaVersion !== 2 || set.kind === 'load-reps'))
   const progress = getWorkoutProgress(workout)
   return (
     <div className={`workout-editor workout-detail workout-detail-${workout.status}`}>
-      {forge && <p className="record-hint workout-detail-progress">{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total} · charges figées à l’enregistrement.</p>}
+      {forge && <p className="record-hint workout-detail-progress">{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total} · {loaded ? 'charges figées' : 'programmation conservée'} à l’enregistrement.</p>}
       <div className="workout-card-actions">
         {!completed && onTrack && <button className="record-button record-button-primary" type="button" onClick={onTrack}>{started ? 'Reprendre le suivi' : 'Démarrer le suivi'}</button>}
         {!completed && onEdit && <button className="record-button" type="button" disabled={started} aria-describedby={started ? 'workout-program-protection' : undefined} onClick={onEdit}>Modifier</button>}
@@ -28,7 +29,7 @@ export default function WorkoutDetail({ workout, onEdit, onNotes, onDelete, onTr
       {completed && <p className="record-hint">Performances en lecture seule. Pour les corriger, réouvrez explicitement la séance. Les notes restent modifiables.</p>}
       {!forge && <>
         <p className="record-hint">{progress.completed} série{progress.completed > 1 ? 's' : ''} réalisée{progress.completed > 1 ? 's' : ''} sur {progress.total}</p>
-        <p className="record-hint">Charges conservées lors de l’enregistrement, indépendamment des Records actuels.</p>
+        {loaded && <p className="record-hint">Charges conservées lors de l’enregistrement, indépendamment des Records actuels.</p>}
       </>}
       {forge && <h2 className="sessions-section-title workout-program-title">Programme · {workout.exercises.length} exercice{workout.exercises.length > 1 ? 's' : ''}</h2>}
       {workout.exercises.map((block, index) => (

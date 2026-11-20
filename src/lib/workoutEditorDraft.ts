@@ -26,6 +26,10 @@ export function recordSnapshot(record: PersonalRecord): ReferenceSnapshot {
 function setToDraft(set: AppWorkoutSet): AppSetDraft {
   if (set.schemaVersion !== 2) return { id: set.id, repsInput: String(set.reps), intensityInput: String(set.intensityPct),
     rounding: { ...set.rounding }, savedLoad: set.load ? { ...set.load } : null }
+  if (set.kind !== 'load-reps') return {
+    id: set.id, kind: set.kind, repsInput: '', intensityInput: '', rounding: { mode: 'exact' },
+    ...(set.kind === 'reps' ? { repsOnlyInput: String(set.reps) } : { durationInput: String(set.durationSeconds) }),
+  }
   const draft: AppSetDraft = { id: set.id, repsInput: String(set.reps), intensityInput: '', rounding: { mode: 'exact' } }
   const e2 = newE2LoadDraft(draft)
   if (set.loading === null) e2.method = 'none'
@@ -45,9 +49,16 @@ export function workoutToAppDraft(workout: AppWorkout): AppWorkoutDraft {
 }
 
 export function duplicateAppSetDraft(set: AppSetDraft, records: PersonalRecord[] = []): AppSetDraft {
-  if (!set.e2 || set.e2.method === 'legacy') return duplicateWorkoutSetDraft(set)
+  if (set.kind === 'reps' || set.kind === 'duration') return {
+    id: crypto.randomUUID(), kind: set.kind, repsInput: '', intensityInput: '', rounding: { mode: 'exact' },
+    ...(set.kind === 'reps' ? { repsOnlyInput: set.repsOnlyInput } : { durationInput: set.durationInput }),
+  }
   const copy = structuredClone(set)
   copy.id = crypto.randomUUID()
+  if (!set.e2 || set.e2.method === 'legacy') {
+    delete copy.savedLoad
+    return { ...copy, ...duplicateWorkoutSetDraft(set) }
+  }
   if (copy.e2) {
     delete copy.e2.savedPlan
     const record = records.find((item) => item.exerciseId === copy.e2?.reference?.exerciseId)
@@ -107,6 +118,7 @@ export function resolveE2Load(e2: E2LoadDraft, records: PersonalRecord[] | null)
 }
 
 export function getAppSetLoad(set: AppSetDraft, records: PersonalRecord[] | null, exerciseId: string) {
+  if (set.kind === 'reps' || set.kind === 'duration') return { status: 'unavailable' as const }
   if (!set.e2 || set.e2.method === 'legacy') {
     const record = isRecordExerciseId(exerciseId) ? records?.find((item) => item.exerciseId === exerciseId) : undefined
     return getWorkoutSetLoad(set, record?.oneRepMaxKg)
@@ -121,6 +133,12 @@ export function getAppSetLoad(set: AppSetDraft, records: PersonalRecord[] | null
 
 export function validateAppWorkoutDraft(draft: AppWorkoutDraft, records: PersonalRecord[] | null = []): AppDraftValidation {
   const projection = { ...draft, exercises: draft.exercises.map((block) => ({ ...block, sets: block.sets.map((set) => {
+    // Le validateur historique contrôle aussi titre, date et structure. Ces valeurs
+    // techniques ne sont jamais sérialisées ; chaque branche est produite ci-dessous.
+    if (set.kind === 'reps' || set.kind === 'duration') return {
+      id: set.id, repsInput: set.kind === 'reps' ? set.repsOnlyInput ?? '' : '1',
+      intensityInput: '1', rounding: { mode: 'exact' as const }, savedLoad: null,
+    }
     if (!set.e2 || set.e2.method === 'legacy') return set
     return { id: set.id, repsInput: set.repsInput, intensityInput: '1', rounding: { mode: 'exact' as const }, savedLoad: null }
   }) })) }
@@ -128,6 +146,19 @@ export function validateAppWorkoutDraft(draft: AppWorkoutDraft, records: Persona
   const errors: AppDraftErrors = base.errors
   let valid = base.valid
   const exercises = draft.exercises.map((block) => ({ id: block.id, exerciseId: block.exerciseId, sets: block.sets.flatMap((set): AppWorkoutSet[] => {
+    if (set.kind === 'reps') {
+      const reps = parseRepetitions(set.repsOnlyInput ?? '')
+      return reps === null ? [] : [{ schemaVersion: 2, kind: 'reps', id: set.id, reps }]
+    }
+    if (set.kind === 'duration') {
+      const durationSeconds = parseRepetitions(set.durationInput ?? '')
+      if (durationSeconds === null) {
+        valid = false
+        errors.blocks[block.id].fields[set.id] = { duration: 'Saisissez un nombre entier de secondes supérieur à 0, dans les limites numériques sûres.' }
+        return []
+      }
+      return [{ schemaVersion: 2, kind: 'duration', id: set.id, durationSeconds }]
+    }
     if (!set.e2 || set.e2.method === 'legacy') {
       const found = base.workout?.exercises.find((item) => item.id === block.id)?.sets.find((item) => item.id === set.id)
       return found ? [found] : []

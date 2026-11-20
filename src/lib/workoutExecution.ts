@@ -1,6 +1,6 @@
 import { plannedSetLoad } from './workoutPresentation.ts'
 import { decimalParts } from './loadCalculator.ts'
-import type { AppWorkout as Workout, AppWorkoutSet as WorkoutSet, Workout as LegacyWorkout, WorkoutSetExecution } from '../types/workout.ts'
+import type { AppWorkout as Workout, LegacyWorkoutSet, LoadedWorkoutSetV2, Workout as LegacyWorkout, WorkoutSetExecution } from '../types/workout.ts'
 
 // null = champ intact, '' = effacement volontaire, autre texte = saisie réelle.
 export type ExecutionInputs = { reps: string | null; loadKg: string | null }
@@ -75,7 +75,7 @@ export function parseExecutionLoad(input: string): number | null {
 }
 
 export function confirmSetExecution(
-  set: WorkoutSet,
+  set: LegacyWorkoutSet | LoadedWorkoutSetV2,
   inputs: ExecutionInputs,
 ): { execution: WorkoutSetExecution | null; errors: Partial<Record<keyof ExecutionInputs, string>> } {
   const reps = inputs.reps === null ? set.reps : parseExecutionReps(inputs.reps)

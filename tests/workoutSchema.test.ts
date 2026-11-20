@@ -250,7 +250,7 @@ describe('séries et exécutions E2 selon leur type', () => {
   })
 })
 
-describe('structures mixtes E2 et restrictions publiques E2-C', () => {
+describe('structures mixtes E2 et activation publique E2-C', () => {
   it('reconnaît V1 et E2 chargée dans un même bloc, avec méthodes différentes', () => {
     const source = stored([legacySet(), loadedSet(), { ...loadedSet(), id: 'manual', loading: { method: 'manual', loadKg: 85 } as const }])
     const before = structuredClone(source)
@@ -260,12 +260,15 @@ describe('structures mixtes E2 et restrictions publiques E2-C', () => {
     assert.equal(isWorkout(source), true)
   })
 
-  it('autorise les trois suivis dans des blocs séparés, sans types contradictoires dans un bloc', () => {
+  it('autorise les trois suivis dans des blocs séparés et dans un même bloc', () => {
     const source = stored([loadedSet()])
     source.exercises.push({ id: 'reps-block', exerciseId: 'pull-up', sets: [{ schemaVersion: 2, id: 'reps', kind: 'reps', reps: 10 }] },
       { id: 'time-block', exerciseId: 'jerk-recovery', sets: [{ schemaVersion: 2, id: 'time', kind: 'duration', durationSeconds: 45 }] })
     assert.equal(isStoredWorkout(source), true)
-    assert.equal(isStoredWorkout(stored([loadedSet(), { schemaVersion: 2, id: 'time', kind: 'duration', durationSeconds: 45 }])), false)
+    const mixed = stored([loadedSet(), { schemaVersion: 2, id: 'time', kind: 'duration', durationSeconds: 45 },
+      { schemaVersion: 2, id: 'reps', kind: 'reps', reps: 10 }])
+    assert.equal(isStoredWorkout(mixed), true)
+    assert.equal(isWorkout(mixed), true)
   })
 
   it('refuse une liste entière si une série ou une identité est invalide', () => {
@@ -290,7 +293,7 @@ describe('structures mixtes E2 et restrictions publiques E2-C', () => {
     }
   })
 
-  it('refuse les hybrides et les suivis E2-C en lecture/import/export sans toucher au stockage', () => {
+  it('refuse les hybrides en lecture/import/export sans toucher au stockage', () => {
     const values = new Map<string, string>()
     let writes = 0
     const storage = {
@@ -298,8 +301,9 @@ describe('structures mixtes E2 et restrictions publiques E2-C', () => {
       setItem: (key: string, value: string) => { writes++; values.set(key, value) },
       removeItem: (key: string) => { writes++; values.delete(key) },
     }
-    for (const source of [stored([{ schemaVersion: 2, id: 'time', kind: 'duration', durationSeconds: 45 }]),
-      stored([{ schemaVersion: 2, id: 'reps', kind: 'reps', reps: 10 }]), stored([{ ...legacySet(), ...loadedSet() }])]) {
+    for (const source of [stored([{ ...legacySet(), ...loadedSet() }]),
+      stored([{ schemaVersion: 2, id: 'time', kind: 'duration', durationSeconds: 45, reps: 10 }]),
+      stored([{ schemaVersion: 2, id: 'reps', kind: 'reps', reps: 10, durationSeconds: 45 }])]) {
       const raw = JSON.stringify([source])
       values.set(workoutsStorageKey, raw)
       assert.equal(loadWorkouts(storage).ok, false)
